@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { MapPin, Calendar, Clock, Users, IndianRupee, Map as MapIcon, Crosshair, X, Plus, Trash2, Navigation } from "lucide-react";
+import { MapPin, Calendar as CalendarIcon, Clock, Users, IndianRupee, Map as MapIcon, Crosshair, X, Plus, Trash2, Navigation, Car, ChevronRight } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/src/components/ui/card";
 import { Label } from "@/src/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/src/components/ui/popover";
+import { Calendar } from "@/src/components/ui/calendar";
+import { format, parse } from "date-fns";
+import { cn } from "@/src/lib/utils";
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap, Polyline } from "react-leaflet";
 import L from "leaflet";
 import { toast } from "sonner";
@@ -58,6 +62,7 @@ export default function PostRide() {
     time: "",
     seats: "",
     price: "",
+    vehicleId: "",
   });
 
   const [stops, setStops] = useState<{id: string, name: string, coords: [number, number] | null}[]>([]);
@@ -67,7 +72,15 @@ export default function PostRide() {
   const [fromCoords, setFromCoords] = useState<[number, number] | null>(null);
   const [toCoords, setToCoords] = useState<[number, number] | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
+  const [routeGeometry, setRouteGeometry] = useState<[number, number][] | null>(null);
   const [isLongTrip, setIsLongTrip] = useState(false);
+
+  // Auto-select first vehicle if available
+  useEffect(() => {
+    if (user?.vehicles && user.vehicles.length > 0 && !formData.vehicleId) {
+      setFormData(prev => ({ ...prev, vehicleId: user.vehicles![0].id }));
+    }
+  }, [user, formData.vehicleId]);
 
   useEffect(() => {
     const initLocation = async () => {
@@ -86,27 +99,67 @@ export default function PostRide() {
     initLocation();
   }, []);
 
-  // Calculate distance when coords change
+  // Calculate distance and route when coords change
   useEffect(() => {
-    if (fromCoords && toCoords) {
-      // Calculate straight-line distance using Haversine formula
-      const R = 6371; // Radius of the earth in km
-      const dLat = (toCoords[0] - fromCoords[0]) * (Math.PI / 180);
-      const dLon = (toCoords[1] - fromCoords[1]) * (Math.PI / 180);
-      const a = 
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(fromCoords[0] * (Math.PI / 180)) * Math.cos(toCoords[0] * (Math.PI / 180)) * 
-        Math.sin(dLon / 2) * Math.sin(dLon / 2); 
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); 
-      const d = R * c; // Distance in km
-      
-      setDistance(Math.round(d));
-      setIsLongTrip(d > 100);
+    const fetchRoute = async () => {
+      if (fromCoords && toCoords) {
+        try {
+          // Construct coordinates string for OSRM: lon,lat;lon,lat;...
+          const stopCoords = stops
+            .filter(s => s.coords)
+            .map(s => `${s.coords![1]},${s.coords![0]}`)
+            .join(';');
+          
+          const coords = `${fromCoords[1]},${fromCoords[0]}${stopCoords ? ';' + stopCoords : ''};${toCoords[1]},${toCoords[0]}`;
+          
+          const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`);
+          const data = await res.json();
+          
+          if (data.routes && data.routes.length > 0) {
+            const route = data.routes[0];
+            const d = Math.round(route.distance / 1000); // Convert meters to km
+            const geometry = route.geometry.coordinates.map((c: any) => [c[1], c[0]] as [number, number]);
+            
+            setDistance(d);
+            setRouteGeometry(geometry);
+          } else {
+            // Fallback to straight line if OSRM fails
+            const R = 6371;
+            const dLat = (toCoords[0] - fromCoords[0]) * (Math.PI / 180);
+            const dLon = (toCoords[1] - fromCoords[1]) * (Math.PI / 180);
+            const a = 
+              Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(fromCoords[0] * (Math.PI / 180)) * Math.cos(toCoords[0] * (Math.PI / 180)) * 
+              Math.sin(dLon / 2) * Math.sin(dLon / 2); 
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); 
+            const d = Math.round(R * c);
+            
+            setDistance(d);
+            setRouteGeometry([fromCoords, toCoords]);
+          }
+        } catch (error) {
+          console.error("Routing error:", error);
+        }
+      } else {
+        setDistance(null);
+        setRouteGeometry(null);
+      }
+    };
+
+    fetchRoute();
+  }, [fromCoords, toCoords, stops]);
+
+  // Update isLongTrip based on 24-hour rule
+  useEffect(() => {
+    if (formData.date && formData.time) {
+      const rideDateTime = new Date(`${formData.date}T${formData.time}`);
+      const now = new Date();
+      const diffHours = (rideDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+      setIsLongTrip(diffHours > 24);
     } else {
-      setDistance(null);
       setIsLongTrip(false);
     }
-  }, [fromCoords, toCoords]);
+  }, [formData.date, formData.time]);
 
   const handleLocationSelect = async (lat: number, lng: number, mode: string) => {
     toast.loading("Fetching location details...", { id: "geocode" });
@@ -211,6 +264,9 @@ export default function PostRide() {
     setLoading(true);
     
     try {
+      const selectedVehicle = user?.vehicles?.find(v => v.id === formData.vehicleId);
+      const carInfo = selectedVehicle ? `${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model}` : "Your Vehicle";
+
       // Add ride to context
       await addRide({
         from: formData.from,
@@ -223,11 +279,12 @@ export default function PostRide() {
         driverId: user?.id || "anonymous",
         rating: 5.0, // Default new user rating
         verified: true,
-        car: "Your Vehicle", // Default or could add a field for this
+        car: carInfo,
         coords: fromCoords,
         stops: stops,
         distance: distance || undefined,
-        isLongTrip: isLongTrip
+        isLongTrip: isLongTrip,
+        routeGeometry: routeGeometry || undefined
       });
 
       setLoading(false);
@@ -365,22 +422,64 @@ export default function PostRide() {
                   </div>
                 </div>
 
+                {/* Vehicle Selection */}
+                <div className="space-y-2">
+                  <Label>Select Vehicle</Label>
+                  <div className="relative">
+                    <Car className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <select 
+                      required
+                      className="w-full pl-9 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      value={formData.vehicleId}
+                      onChange={(e) => setFormData({...formData, vehicleId: e.target.value})}
+                    >
+                      <option value="">Select a vehicle</option>
+                      {user?.vehicles?.map(v => (
+                        <option key={v.id} value={v.id}>{v.year} {v.make} {v.model} ({v.licensePlate})</option>
+                      ))}
+                    </select>
+                  </div>
+                  {(!user?.vehicles || user.vehicles.length === 0) && (
+                    <p className="text-xs text-amber-600">Please add a vehicle in your profile first.</p>
+                  )}
+                </div>
+
                 <hr className="border-gray-100" />
 
                 {/* Schedule Section */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Date</Label>
-                    <div className="relative">
-                      <Calendar className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                      <Input 
-                        required 
-                        type="date" 
-                        className="pl-9" 
-                        value={formData.date}
-                        onChange={(e) => setFormData({...formData, date: e.target.value})}
-                      />
-                    </div>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <div className="relative cursor-pointer">
+                          <CalendarIcon className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              "w-full pl-9 justify-start text-left font-normal h-10",
+                              !formData.date && "text-muted-foreground"
+                            )}
+                          >
+                            {formData.date ? format(parse(formData.date, 'yyyy-MM-dd', new Date()), "PPP") : <span>Pick a date</span>}
+                          </Button>
+                        </div>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          captionLayout="dropdown"
+                          selected={formData.date ? parse(formData.date, 'yyyy-MM-dd', new Date()) : undefined}
+                          onSelect={(date) => {
+                            if (date) {
+                              setFormData({ ...formData, date: format(date, 'yyyy-MM-dd') });
+                            }
+                          }}
+                          initialFocus
+                          disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                        />
+                      </PopoverContent>
+                    </Popover>
                   </div>
                   <div className="space-y-2">
                     <Label>Time</Label>
@@ -476,7 +575,17 @@ export default function PostRide() {
             ))}
             
             {/* Draw route line if both from and to are set */}
-            {fromCoords && toCoords && (
+            {routeGeometry && (
+              <Polyline 
+                positions={routeGeometry} 
+                color="#2563eb" 
+                weight={5} 
+                opacity={0.7}
+              />
+            )}
+            
+            {/* Fallback straight line if routeGeometry is not yet available but coords are */}
+            {!routeGeometry && fromCoords && toCoords && (
               <Polyline 
                 positions={[fromCoords, ...stops.filter(s => s.coords).map(s => s.coords as [number, number]), toCoords]} 
                 color="blue" 

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { db } from '../firebase';
-import { collection, doc, setDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, doc, setDoc, onSnapshot, query, orderBy, deleteDoc } from 'firebase/firestore';
 
 export interface Ride {
   id: string;
@@ -19,12 +19,14 @@ export interface Ride {
   stops?: { id: string; name: string; coords: [number, number] | null }[];
   distance?: number;
   isLongTrip?: boolean;
+  routeGeometry?: [number, number][];
   createdAt?: number;
 }
 
 interface RideContextType {
   rides: Ride[];
   addRide: (ride: Omit<Ride, 'id'>) => Promise<void>;
+  deleteRide: (id: string) => Promise<void>;
 }
 
 const RideContext = createContext<RideContextType | undefined>(undefined);
@@ -43,6 +45,13 @@ export function RideProvider({ children }: { children: ReactNode }) {
             data.stops = JSON.parse(data.stops);
           } catch (e) {
             data.stops = [];
+          }
+        }
+        if (data.routeGeometry && typeof data.routeGeometry === 'string') {
+          try {
+            data.routeGeometry = JSON.parse(data.routeGeometry);
+          } catch (e) {
+            data.routeGeometry = [];
           }
         }
         ridesData.push(data as Ride);
@@ -67,6 +76,10 @@ export function RideProvider({ children }: { children: ReactNode }) {
       newRide.stops = JSON.stringify(newRide.stops);
     }
 
+    if (newRide.routeGeometry) {
+      newRide.routeGeometry = JSON.stringify(newRide.routeGeometry);
+    }
+
     try {
       await setDoc(doc(db, 'rides', id), newRide);
     } catch (error) {
@@ -75,8 +88,17 @@ export function RideProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const deleteRide = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'rides', id));
+    } catch (error) {
+      console.error("Error deleting ride:", error);
+      throw error;
+    }
+  };
+
   return (
-    <RideContext.Provider value={{ rides, addRide }}>
+    <RideContext.Provider value={{ rides, addRide, deleteRide }}>
       {children}
     </RideContext.Provider>
   );

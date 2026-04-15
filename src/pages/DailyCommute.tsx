@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMapEvents, useMap } from "react-leaflet";
 import L from "leaflet";
-import { Car, MapPin, Navigation, Crosshair, Users, ShieldCheck, X, ArrowLeft, IndianRupee, AlertTriangle } from "lucide-react";
+import { Car, MapPin, Navigation, Crosshair, Users, ShieldCheck, X, ArrowLeft, IndianRupee, AlertTriangle, MessageSquare } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/src/components/ui/card";
@@ -11,7 +12,10 @@ import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
 import { useCommute } from "../contexts/CommuteContext";
 import { useNotifications } from "../contexts/NotificationContext";
+import { useChat } from "../contexts/ChatContext";
 import { getCurrentLocation } from "../lib/locationUtils";
+import { db } from "../firebase";
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "firebase/firestore";
 import "leaflet/dist/leaflet.css";
 
 // Fix for default marker icon in react-leaflet
@@ -55,8 +59,10 @@ function MapRecenter({ coords }: { coords: [number, number] | null }) {
 
 export default function DailyCommute() {
   const { user } = useAuth();
-  const { activeCommutes, startCommute, stopCommute, updateLocation, requestCommute, updateRequestStatus } = useCommute();
+  const location = useLocation();
+  const { activeCommutes, startCommute, stopCommute, updateLocation } = useCommute();
   const { addNotification } = useNotifications();
+  const { joinRequests, chats, sendJoinRequest, acceptJoinRequest, rejectJoinRequest, sendMessage, cleanupRideData } = useChat();
   
   const [viewMode, setViewMode] = useState<'find' | 'offer'>('find');
   const [mapMode, setMapMode] = useState<'start' | 'end' | 'checkpoint' | null>(null);
@@ -68,12 +74,29 @@ export default function DailyCommute() {
   const [checkpoints, setCheckpoints] = useState<{name: string, coords: [number, number]}[]>([]);
   const [seats, setSeats] = useState(2);
   const [fare, setFare] = useState<number | "">("");
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
+
+  // Auto-select first vehicle if available
+  useEffect(() => {
+    if (user?.vehicles && user.vehicles.length > 0 && !selectedVehicleId) {
+      setSelectedVehicleId(user.vehicles[0].id);
+    }
+  }, [user, selectedVehicleId]);
+
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [availableRoutes, setAvailableRoutes] = useState<any[]>([]);
   const [selectedRouteIndex, setSelectedRouteIndex] = useState<number>(0);
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
   
+  // Handle pre-selected driver from navigation state
+  useEffect(() => {
+    if (location.state?.selectedDriverId) {
+      setSelectedDriverId(location.state.selectedDriverId);
+      setViewMode('find');
+    }
+  }, [location.state]);
+
   // Timer for request timeouts
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -159,7 +182,13 @@ export default function DailyCommute() {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
             setUserLocation([lat, lng]);
-            updateLocation(myActiveCommute.id, [lat, lng]);
+            
+            // Only update if the commute still exists in our local state
+            if (activeCommutes.some(c => c.id === myActiveCommute.id)) {
+              updateLocation(myActiveCommute.id, [lat, lng]).catch(err => {
+                console.warn("Silent failure updating location (likely commute ended):", err);
+              });
+            }
           },
           (error) => console.error("Error watching position:", error),
           { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
@@ -245,6 +274,9 @@ export default function DailyCommute() {
       ? selectedRoute.geometry.coordinates.map((c: any) => [c[1], c[0]] as [number, number]) 
       : undefined;
 
+    const selectedVehicle = user?.vehicles?.find(v => v.id === selectedVehicleId);
+    const carInfo = selectedVehicle ? `${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model}` : "Your Vehicle";
+
     try {
       await startCommute({
         driverId: user.id,
@@ -259,7 +291,8 @@ export default function DailyCommute() {
         startName,
         endName,
         seats,
-        fare: fare === "" ? 0 : Number(fare)
+        fare: fare === "" ? 0 : Number(fare),
+        car: carInfo
       });
       toast.success("You are now active! Passengers can see your route.");
     } catch (e) {
@@ -270,6 +303,7 @@ export default function DailyCommute() {
   const handleStopCommute = async () => {
     if (myActiveCommute) {
       try {
+        await cleanupRideData(myActiveCommute.id);
         await stopCommute(myActiveCommute.id);
         toast.success("You are now offline.");
       } catch (e) {
@@ -292,27 +326,54 @@ export default function DailyCommute() {
       return;
     }
 
-    const commute = activeCommutes.find(c => c.id === commuteId);
-    const existingReq = commute?.requests?.find(r => r.passengerId === user.id);
-    
-    if (existingReq) {
-      if (existingReq.status === 'pending' || existingReq.status === 'accepted') {
-        toast.error("You have already requested this ride.");
-        return;
-      }
-      if (existingReq.status === 'rejected' && existingReq.updatedAt && Date.now() - existingReq.updatedAt < 30000) {
-        const timeLeft = Math.ceil((30000 - (Date.now() - existingReq.updatedAt)) / 1000);
-        toast.error(`Please wait ${timeLeft}s before requesting again.`);
-        return;
-      }
-    }
-
     try {
-      await requestCommute(commuteId, user.id, user.name);
+      await sendJoinRequest(commuteId, driverId, driverName, 'daily-commute');
       addNotification(`${user.name} has requested to join your live ride.`);
       toast.success(`Ride request sent to ${driverName}! They will be notified.`);
     } catch (e) {
       toast.error("Failed to request ride.");
+    }
+  };
+
+  // Chat logic
+  const [chatMessage, setChatMessage] = useState("");
+  const [messages, setMessages] = useState<any[]>([]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const myChat = chats.find(c => c.rideId === selectedDriverId || (myActiveCommute && c.rideId === myActiveCommute.id));
+  const myRequest = joinRequests.find(r => r.rideId === selectedDriverId && r.passengerId === user?.id);
+
+  useEffect(() => {
+    if (myChat) {
+      const q = query(
+        collection(db, `chats/${myChat.id}/messages`),
+        orderBy("createdAt", "asc")
+      );
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setMessages(msgs);
+      });
+      return () => unsubscribe();
+    } else {
+      setMessages([]);
+    }
+  }, [myChat?.id]);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatMessage.trim() || !myChat) return;
+
+    try {
+      await sendMessage(myChat.id, chatMessage);
+      setChatMessage("");
+    } catch (error) {
+      toast.error("Failed to send message");
     }
   };
 
@@ -369,49 +430,70 @@ export default function DailyCommute() {
                     </div>
 
                     {/* Requests UI */}
-                    {myActiveCommute.requests && myActiveCommute.requests.length > 0 && (
+                    {joinRequests.filter(r => r.rideId === myActiveCommute.id && r.status === 'pending').length > 0 && (
                       <div className="mt-6 text-left space-y-3 border-t pt-4">
                         <h4 className="font-semibold text-gray-900 flex items-center justify-between">
                           Ride Requests
-                          {myActiveCommute.requests.filter(r => r.status === 'pending').length > 0 && (
-                            <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded-full">
-                              {myActiveCommute.requests.filter(r => r.status === 'pending').length} New
-                            </span>
-                          )}
+                          <span className="bg-red-100 text-red-600 text-xs px-2 py-0.5 rounded-full">
+                            {joinRequests.filter(r => r.rideId === myActiveCommute.id && r.status === 'pending').length} New
+                          </span>
                         </h4>
                         
-                        {myActiveCommute.requests.filter(r => r.status === 'pending').map(req => (
+                        {joinRequests.filter(r => r.rideId === myActiveCommute.id && r.status === 'pending').map(req => (
                            <div key={req.id} className="flex justify-between items-center bg-white border p-3 rounded-lg shadow-sm">
                              <span className="font-medium text-sm">{req.passengerName}</span>
                              <div className="flex gap-2">
                                <Button size="sm" className="h-8 bg-green-600 hover:bg-green-700 text-xs" onClick={() => {
-                                 updateRequestStatus(myActiveCommute.id, req.id, 'accepted');
+                                 acceptJoinRequest(req);
                                  addNotification(`${myActiveCommute.driverName} accepted your commute request!`);
                                  toast.success(`Accepted ${req.passengerName}'s request`);
                                }}>Accept</Button>
                                <Button size="sm" variant="outline" className="h-8 text-red-600 border-red-200 hover:bg-red-50 text-xs" onClick={() => {
-                                 updateRequestStatus(myActiveCommute.id, req.id, 'rejected');
+                                 rejectJoinRequest(req.id);
                                  toast.success(`Rejected ${req.passengerName}'s request`);
                                }}>Reject</Button>
                              </div>
                            </div>
                         ))}
+                      </div>
+                    )}
 
-                        {myActiveCommute.requests.filter(r => r.status === 'accepted').length > 0 && (
-                          <div className="mt-4">
-                            <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Accepted Passengers</h5>
-                            <div className="space-y-2">
-                              {myActiveCommute.requests.filter(r => r.status === 'accepted').map(req => (
-                                <div key={req.id} className="text-sm font-medium text-gray-900 bg-gray-50 p-2.5 rounded-lg border flex items-center gap-2">
-                                  <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs">
-                                    {req.passengerName.charAt(0).toUpperCase()}
+                    {/* Active Chats for Driver */}
+                    {chats.filter(c => c.rideId === myActiveCommute.id).length > 0 && (
+                      <div className="mt-4 border-t pt-4">
+                        <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 text-left">Active Chats</h5>
+                        <div className="space-y-2">
+                          {chats.filter(c => c.rideId === myActiveCommute.id).map(chat => (
+                            <div key={chat.id} className="bg-white border rounded-lg p-3">
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-sm font-bold">{chat.passengerName}</span>
+                                <span className="text-[10px] text-gray-400">Accepted</span>
+                              </div>
+                              
+                              {/* Mini Chat Window */}
+                              <div className="h-32 overflow-y-auto bg-gray-50 rounded p-2 mb-2 text-xs space-y-2">
+                                {messages.filter(m => m.chatId === chat.id || !m.chatId).map((m, i) => (
+                                  <div key={i} className={`${m.senderId === user?.id ? 'text-right' : 'text-left'}`}>
+                                    <span className={`inline-block px-2 py-1 rounded-lg ${m.senderId === user?.id ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800'}`}>
+                                      {m.text}
+                                    </span>
                                   </div>
-                                  {req.passengerName}
-                                </div>
-                              ))}
+                                ))}
+                              </div>
+                              
+                              <form onSubmit={handleSendMessage} className="flex gap-1">
+                                <Input 
+                                  size={1}
+                                  className="h-8 text-xs" 
+                                  placeholder="Reply..." 
+                                  value={chatMessage}
+                                  onChange={(e) => setChatMessage(e.target.value)}
+                                />
+                                <Button size="sm" className="h-8 px-2"><Navigation className="h-3 w-3" /></Button>
+                              </form>
                             </div>
-                          </div>
-                        )}
+                          ))}
+                        </div>
                       </div>
                     )}
 
@@ -510,6 +592,27 @@ export default function DailyCommute() {
                         <Input type="number" min="0" placeholder="e.g. 50" value={fare} onChange={(e) => setFare(e.target.value === "" ? "" : parseInt(e.target.value))} />
                       </div>
                     </div>
+
+                    <div className="space-y-2">
+                      <Label>Select Vehicle</Label>
+                      <div className="relative">
+                        <Car className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                        <select 
+                          required
+                          className="w-full pl-9 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          value={selectedVehicleId}
+                          onChange={(e) => setSelectedVehicleId(e.target.value)}
+                        >
+                          <option value="">Select a vehicle</option>
+                          {user?.vehicles?.map(v => (
+                            <option key={v.id} value={v.id}>{v.year} {v.make} {v.model} ({v.licensePlate})</option>
+                          ))}
+                        </select>
+                      </div>
+                      {(!user?.vehicles || user.vehicles.length === 0) && (
+                        <p className="text-xs text-amber-600">Please add a vehicle in your profile first.</p>
+                      )}
+                    </div>
                     
                     {mapMode && (
                       <div className="p-3 bg-blue-50 text-blue-700 rounded-lg text-sm flex items-center gap-2 animate-pulse">
@@ -532,9 +635,9 @@ export default function DailyCommute() {
                 </Button>
                 <CardTitle className="text-xl flex items-center gap-2">
                   <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm">
-                    {selectedDriver.driverName.charAt(0).toUpperCase()}
+                    {selectedDriver.driverName?.charAt(0).toUpperCase() || "D"}
                   </div>
-                  {selectedDriver.driverName}'s Route
+                  {selectedDriver.driverName || "Driver"}'s Route
                 </CardTitle>
                 <CardDescription>View live location and route details.</CardDescription>
               </CardHeader>
@@ -582,21 +685,67 @@ export default function DailyCommute() {
                           <p className="font-bold text-lg flex items-center gap-1"><IndianRupee className="h-4 w-4 text-green-600" /> {selectedDriver.fare}</p>
                         </div>
                       )}
+                      {selectedDriver.car && (
+                        <div>
+                          <p className="text-sm text-gray-500">Vehicle</p>
+                          <p className="font-bold text-lg flex items-center gap-1"><Car className="h-4 w-4 text-gray-400" /> {selectedDriver.car}</p>
+                        </div>
+                      )}
                     </div>
                     {(() => {
-                      const myReq = selectedDriver.requests?.find(r => r.passengerId === user?.id);
-                      if (myReq?.status === 'pending') return <Button disabled className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-0 opacity-100">Request Pending</Button>;
-                      if (myReq?.status === 'accepted') return <Button disabled className="bg-green-100 text-green-700 hover:bg-green-100 border-0 opacity-100">Request Accepted</Button>;
-                      if (myReq?.status === 'rejected') {
-                        const timeSinceUpdate = now - (myReq.updatedAt || 0);
-                        if (timeSinceUpdate < 30000) {
-                          const timeLeft = Math.ceil((30000 - timeSinceUpdate) / 1000);
-                          return <Button disabled className="bg-red-100 text-red-700 hover:bg-red-100 border-0 opacity-100">Rejected ({timeLeft}s)</Button>;
-                        }
-                      }
+                      if (user && selectedDriver.driverId === user.id) return <Button variant="outline" onClick={() => { setViewMode('offer'); setSelectedDriverId(null); }}>Manage My Ride</Button>;
+                      if (myRequest?.status === 'pending') return <Button disabled className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-0 opacity-100">Request Pending</Button>;
+                      if (myRequest?.status === 'accepted') return <Button disabled className="bg-green-100 text-green-700 hover:bg-green-100 border-0 opacity-100">Request Accepted</Button>;
+                      if (myRequest?.status === 'rejected') return <Button disabled className="bg-red-100 text-red-700 hover:bg-red-100 border-0 opacity-100">Rejected</Button>;
+                      
                       return <Button onClick={() => handleRequestRide(selectedDriver.id, selectedDriver.driverId, selectedDriver.driverName)}>Request Ride</Button>;
                     })()}
                   </div>
+
+                  {/* Chat Interface for Passenger */}
+                  {myChat && (
+                    <div className="mt-4 border-t pt-4">
+                      <h4 className="font-bold text-gray-900 mb-2 flex items-center gap-2">
+                        <MessageSquare className="h-4 w-4 text-blue-600" />
+                        Chat with {selectedDriver.driverName}
+                      </h4>
+                      <div 
+                        ref={scrollRef}
+                        className="h-48 overflow-y-auto bg-gray-50 rounded-xl p-4 mb-4 space-y-3 border border-gray-100"
+                      >
+                        {messages.map((msg) => (
+                          <div 
+                            key={msg.id} 
+                            className={`flex flex-col ${msg.senderId === user?.id ? 'items-end' : 'items-start'}`}
+                          >
+                            <div 
+                              className={`max-w-[80%] px-4 py-2 rounded-2xl text-sm ${
+                                msg.senderId === user?.id 
+                                  ? 'bg-blue-600 text-white rounded-tr-none' 
+                                  : 'bg-white text-gray-800 border border-gray-200 rounded-tl-none'
+                              }`}
+                            >
+                              {msg.text}
+                            </div>
+                            <span className="text-[10px] text-gray-400 mt-1">
+                              {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <form onSubmit={handleSendMessage} className="flex gap-2">
+                        <Input 
+                          placeholder="Type a message..." 
+                          value={chatMessage}
+                          onChange={(e) => setChatMessage(e.target.value)}
+                          className="flex-1"
+                        />
+                        <Button type="submit" size="icon" className="bg-blue-600 hover:bg-blue-700">
+                          <Navigation className="h-4 w-4" />
+                        </Button>
+                      </form>
+                    </div>
+                  )}
                   
                   {/* SOS Button for Accepted Passengers */}
                   {selectedDriver.requests?.find(r => r.passengerId === user?.id)?.status === 'accepted' && (
@@ -634,29 +783,35 @@ export default function DailyCommute() {
                         <div className="flex justify-between items-start mb-2">
                           <div className="flex items-center gap-2">
                             <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm">
-                              {commute.driverName.charAt(0).toUpperCase()}
+                              {commute.driverName?.charAt(0).toUpperCase() || "D"}
                             </div>
                             <div>
-                              <p className="font-semibold text-gray-900 text-sm">{commute.driverName}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="font-semibold text-gray-900 text-sm">{commute.driverName || "Driver"}</p>
+                                {user && commute.driverId === user.id && (
+                                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
+                                    Your Ride
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center text-xs text-gray-500 gap-3">
                                 <span className="flex items-center"><Users className="h-3 w-3 mr-1" /> {commute.seats} seats</span>
                                 {commute.fare !== undefined && commute.fare > 0 && (
                                   <span className="flex items-center text-green-600 font-medium"><IndianRupee className="h-3 w-3 mr-0.5" /> {commute.fare}</span>
                                 )}
+                                {commute.car && (
+                                  <span className="flex items-center text-gray-400"><Car className="h-3 w-3 mr-1" /> {commute.car}</span>
+                                )}
                               </div>
                             </div>
                           </div>
                           {(() => {
-                            const myReq = commute.requests?.find(r => r.passengerId === user?.id);
+                            if (user && commute.driverId === user.id) return <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setViewMode('offer'); setSelectedDriverId(null); }}>Manage</Button>;
+                            const myReq = joinRequests.find(r => r.rideId === commute.id && r.passengerId === user?.id);
                             if (myReq?.status === 'pending') return <Button size="sm" disabled className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-0 opacity-100">Pending</Button>;
                             if (myReq?.status === 'accepted') return <Button size="sm" disabled className="bg-green-100 text-green-700 hover:bg-green-100 border-0 opacity-100">Accepted</Button>;
-                            if (myReq?.status === 'rejected') {
-                              const timeSinceUpdate = now - (myReq.updatedAt || 0);
-                              if (timeSinceUpdate < 30000) {
-                                const timeLeft = Math.ceil((30000 - timeSinceUpdate) / 1000);
-                                return <Button size="sm" disabled className="bg-red-100 text-red-700 hover:bg-red-100 border-0 opacity-100">Wait {timeLeft}s</Button>;
-                              }
-                            }
+                            if (myReq?.status === 'rejected') return <Button size="sm" disabled className="bg-red-100 text-red-700 hover:bg-red-100 border-0 opacity-100">Rejected</Button>;
+                            
                             return <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handleRequestRide(commute.id, commute.driverId, commute.driverName); }}>Request</Button>;
                           })()}
                         </div>
@@ -737,51 +892,56 @@ export default function DailyCommute() {
             )}
 
             {/* Render all active commutes OR only the selected one */}
-            {viewMode === 'find' && (selectedDriver ? [selectedDriver] : nearbyCommutes).map(commute => (
-              <React.Fragment key={commute.id}>
-                <Marker position={commute.startCoords}>
-                  <Popup>Start: {commute.startName}</Popup>
-                </Marker>
-                <Marker position={commute.currentCoords || commute.startCoords} icon={driverIcon}>
-                  <Popup>
-                    <div className="text-center">
-                      <p className="font-bold">{commute.driverName}</p>
-                      <p className="text-xs text-gray-500 mb-1">{commute.seats} seats available</p>
-                      {commute.fare !== undefined && commute.fare > 0 && (
-                        <p className="text-xs text-green-600 font-bold mb-2">₹{commute.fare} per seat</p>
-                      )}
-                      <p className="text-xs text-blue-600 mb-2 font-semibold">Live Location</p>
-                      {(() => {
-                        const myReq = commute.requests?.find(r => r.passengerId === user?.id);
-                        if (myReq?.status === 'pending') return <Button size="sm" disabled className="w-full text-xs h-7 bg-amber-100 text-amber-700 hover:bg-amber-100 border-0 opacity-100">Pending</Button>;
-                        if (myReq?.status === 'accepted') return <Button size="sm" disabled className="w-full text-xs h-7 bg-green-100 text-green-700 hover:bg-green-100 border-0 opacity-100">Accepted</Button>;
-                        if (myReq?.status === 'rejected') {
-                          const timeSinceUpdate = now - (myReq.updatedAt || 0);
-                          if (timeSinceUpdate < 30000) {
-                            const timeLeft = Math.ceil((30000 - timeSinceUpdate) / 1000);
-                            return <Button size="sm" disabled className="w-full text-xs h-7 bg-red-100 text-red-700 hover:bg-red-100 border-0 opacity-100">Wait {timeLeft}s</Button>;
-                          }
-                        }
-                        return <Button size="sm" className="w-full text-xs h-7" onClick={() => handleRequestRide(commute.id, commute.driverId, commute.driverName)}>Request Ride</Button>;
-                      })()}
-                    </div>
-                  </Popup>
-                </Marker>
-                <Marker position={commute.endCoords}>
-                  <Popup>Destination: {commute.endName}</Popup>
-                </Marker>
-                {commute.checkpoints?.map((cp, idx) => (
-                  <Marker key={`active-cp-${commute.id}-${idx}`} position={cp.coords}>
-                    <Popup>Checkpoint: {cp.name}</Popup>
+            {viewMode === 'find' && (selectedDriver ? [selectedDriver] : nearbyCommutes).map(commute => {
+              const currentPos = commute.currentCoords || commute.startCoords;
+              if (!currentPos || isNaN(currentPos[0]) || isNaN(currentPos[1])) return null;
+              if (!commute.startCoords || isNaN(commute.startCoords[0]) || isNaN(commute.startCoords[1])) return null;
+              if (!commute.endCoords || isNaN(commute.endCoords[0]) || isNaN(commute.endCoords[1])) return null;
+
+              return (
+                <React.Fragment key={commute.id}>
+                  <Marker position={commute.startCoords}>
+                    <Popup>Start: {commute.startName}</Popup>
                   </Marker>
-                ))}
-                {commute.routeGeometry ? (
-                  <Polyline positions={commute.routeGeometry} color={selectedDriver ? "blue" : "green"} weight={selectedDriver ? 6 : 5} opacity={0.7} />
-                ) : (
-                  <Polyline positions={[commute.startCoords, ...(commute.checkpoints?.map(c => c.coords) || []), commute.endCoords]} color={selectedDriver ? "blue" : "green"} weight={selectedDriver ? 6 : 4} opacity={0.6} />
-                )}
-              </React.Fragment>
-            ))}
+                  <Marker position={currentPos} icon={driverIcon}>
+                    <Popup>
+                      <div className="text-center">
+                        <p className="font-bold">{commute.driverName}</p>
+                        <p className="text-xs text-gray-500 mb-1">{commute.seats} seats available</p>
+                        {commute.fare !== undefined && commute.fare > 0 && (
+                          <p className="text-xs text-green-600 font-bold mb-2">₹{commute.fare} per seat</p>
+                        )}
+                        <p className="text-xs text-blue-600 mb-2 font-semibold">Live Location</p>
+                        {(() => {
+                          const myReq = joinRequests.find(r => r.rideId === commute.id && r.passengerId === user?.id);
+                          if (myReq?.status === 'pending') return <Button size="sm" disabled className="w-full text-xs h-7 bg-amber-100 text-amber-700 hover:bg-amber-100 border-0 opacity-100">Pending</Button>;
+                          if (myReq?.status === 'accepted') return <Button size="sm" disabled className="w-full text-xs h-7 bg-green-100 text-green-700 hover:bg-green-100 border-0 opacity-100">Accepted</Button>;
+                          if (myReq?.status === 'rejected') return <Button size="sm" disabled className="w-full text-xs h-7 bg-red-100 text-red-700 hover:bg-red-100 border-0 opacity-100">Rejected</Button>;
+                          
+                          return <Button size="sm" className="w-full text-xs h-7" onClick={() => handleRequestRide(commute.id, commute.driverId, commute.driverName)}>Request Ride</Button>;
+                        })()}
+                      </div>
+                    </Popup>
+                  </Marker>
+                  <Marker position={commute.endCoords}>
+                    <Popup>Destination: {commute.endName}</Popup>
+                  </Marker>
+                  {commute.checkpoints?.map((cp, idx) => {
+                    if (!cp.coords || isNaN(cp.coords[0]) || isNaN(cp.coords[1])) return null;
+                    return (
+                      <Marker key={`active-cp-${commute.id}-${idx}`} position={cp.coords}>
+                        <Popup>Checkpoint: {cp.name}</Popup>
+                      </Marker>
+                    );
+                  })}
+                  {commute.routeGeometry ? (
+                    <Polyline positions={commute.routeGeometry} color={selectedDriver ? "blue" : "green"} weight={selectedDriver ? 6 : 5} opacity={0.7} />
+                  ) : (
+                    <Polyline positions={[commute.startCoords, ...(commute.checkpoints?.map(c => c.coords) || []), commute.endCoords]} color={selectedDriver ? "blue" : "green"} weight={selectedDriver ? 6 : 4} opacity={0.6} />
+                  )}
+                </React.Fragment>
+              );
+            })}
           </MapContainer>
         </div>
         )}

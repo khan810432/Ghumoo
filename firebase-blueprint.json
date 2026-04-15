@@ -67,6 +67,49 @@
         "updatedAt": { "type": "number" }
       },
       "required": ["id", "driverId", "driverName", "startCoords", "endCoords", "currentCoords", "startName", "endName", "status", "seats"]
+    },
+    "JoinRequest": {
+      "title": "JoinRequest",
+      "description": "A request from a passenger to join a ride",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "rideId": { "type": "string" },
+        "rideType": { "type": "string", "enum": ["long-trip", "daily-commute"] },
+        "passengerId": { "type": "string" },
+        "passengerName": { "type": "string" },
+        "driverId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "rideId", "rideType", "passengerId", "driverId", "status", "createdAt"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "A chat session between a driver and a passenger",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "rideId": { "type": "string" },
+        "passengerId": { "type": "string" },
+        "driverId": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "rideId", "passengerId", "driverId", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A message within a chat session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "chatId", "senderId", "text", "createdAt"]
     }
   },
   "firestore": {
@@ -81,6 +124,18 @@
     "/commutes/{commuteId}": {
       "schema": { "$ref": "#/entities/Commute" },
       "description": "Stores live daily commutes"
+    },
+    "/joinRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/JoinRequest" },
+      "description": "Stores ride join requests"
+    },
+    "/chats/{chatId}": {
+      "schema": { "$ref": "#/entities/Chat" },
+      "description": "Stores chat sessions"
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Stores messages within a chat"
     }
   }
 }

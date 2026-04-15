@@ -16,6 +16,7 @@ import { NotificationProvider } from "./contexts/NotificationContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { RideProvider } from "./contexts/RideContext";
 import { CommuteProvider } from "./contexts/CommuteContext";
+import { ChatProvider } from "./contexts/ChatContext";
 import DailyCommute from "./pages/DailyCommute";
 import Profile from "./pages/Profile";
 import LongTrips from "./pages/LongTrips";
@@ -40,39 +41,41 @@ export default function App() {
     <AuthProvider>
       <RideProvider>
         <CommuteProvider>
-          <NotificationProvider>
-            <BrowserRouter>
-              <Routes>
-                <Route path="/" element={<Layout />}>
-                  <Route index element={<Home />} />
-                  <Route path="login" element={<Login />} />
-                  <Route path="daily-commute" element={<DailyCommute />} />
-                  <Route path="long-trips" element={<LongTrips />} />
-                  <Route path="profile" element={
+          <ChatProvider>
+            <NotificationProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/" element={<Layout />}>
+                    <Route index element={<Home />} />
+                    <Route path="login" element={<Login />} />
+                    <Route path="daily-commute" element={<DailyCommute />} />
+                    <Route path="long-trips" element={<LongTrips />} />
+                    <Route path="profile" element={
+                      <ProtectedRoute>
+                        <Profile />
+                      </ProtectedRoute>
+                    } />
+                    <Route path="onboarding" element={
                     <ProtectedRoute>
-                      <Profile />
+                      <Onboarding />
                     </ProtectedRoute>
                   } />
-                  <Route path="onboarding" element={
-                  <ProtectedRoute>
-                    <Onboarding />
-                  </ProtectedRoute>
-                } />
-                <Route path="post-ride" element={
-                  <ProtectedRoute>
-                    <PostRide />
-                  </ProtectedRoute>
-                } />
-                <Route path="ride/:id" element={<RideDetail />} />
-                <Route path="admin-portal" element={
-                  <ProtectedRoute requireAdmin={true}>
-                    <AdminDashboard />
-                  </ProtectedRoute>
-                } />
-              </Route>
-            </Routes>
-          </BrowserRouter>
-        </NotificationProvider>
+                  <Route path="post-ride" element={
+                    <ProtectedRoute>
+                      <PostRide />
+                    </ProtectedRoute>
+                  } />
+                  <Route path="ride/:id" element={<RideDetail />} />
+                  <Route path="admin-portal" element={
+                    <ProtectedRoute requireAdmin={true}>
+                      <AdminDashboard />
+                    </ProtectedRoute>
+                  } />
+                </Route>
+              </Routes>
+            </BrowserRouter>
+          </NotificationProvider>
+        </ChatProvider>
         </CommuteProvider>
       </RideProvider>
     </AuthProvider>

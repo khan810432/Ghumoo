@@ -26,6 +26,7 @@ export interface CommuteRoute {
   status: 'active' | 'completed';
   seats: number;
   fare?: number;
+  car?: string;
   requests?: CommuteRequest[];
   updatedAt?: number;
 }
