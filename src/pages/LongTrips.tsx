@@ -6,23 +6,15 @@ import { Input } from "@/src/components/ui/input";
 import { Card, CardContent } from "@/src/components/ui/card";
 import { LocationAutocomplete } from "../components/LocationAutocomplete";
 import { useRides } from "../contexts/RideContext";
-import { useAuth } from "../contexts/AuthContext";
 
 export default function LongTrips() {
-  const { user } = useAuth();
   const { rides } = useRides();
   const [searchFrom, setSearchFrom] = useState("");
   const [searchTo, setSearchTo] = useState("");
   const [searchDate, setSearchDate] = useState("");
 
-  // Filter rides to only show those scheduled for more than 24 hours from now
-  const longTrips = rides.filter(ride => {
-    const rideDateTime = new Date(`${ride.date}T${ride.time}`);
-    const now = new Date();
-    const diffHours = (rideDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
-    
-    return diffHours > 24;
-  });
+  // Filter rides to only show those marked as long trips (distance > 100km)
+  const longTrips = rides.filter(ride => ride.isLongTrip);
 
   const filteredTrips = longTrips.filter(ride => {
     const matchFrom = ride.from.toLowerCase().includes(searchFrom.toLowerCase());
@@ -91,17 +83,10 @@ export default function LongTrips() {
                   <div className="p-6 space-y-4">
                     <div className="flex justify-between items-start">
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-2 text-sm text-gray-500 font-medium">
-                            <Calendar className="h-4 w-4" /> {ride.date}
-                            <span className="text-gray-300">•</span>
-                            <Clock className="h-4 w-4" /> {ride.time}
-                          </div>
-                          {user && ride.driverId === user.id && (
-                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
-                              Your Ride
-                            </span>
-                          )}
+                        <div className="flex items-center gap-2 text-sm text-gray-500 font-medium">
+                          <Calendar className="h-4 w-4" /> {ride.date}
+                          <span className="text-gray-300">•</span>
+                          <Clock className="h-4 w-4" /> {ride.time}
                         </div>
                       </div>
                       <div className="text-xl font-bold text-blue-600 flex items-center">
@@ -135,7 +120,7 @@ export default function LongTrips() {
                         </div>
                         <div>
                           <div className="flex items-center gap-1">
-                            <p className="text-sm font-semibold text-gray-900">{ride.driver || "Driver"}</p>
+                            <p className="text-sm font-semibold text-gray-900">{ride.driver}</p>
                             {ride.verified && <ShieldCheck className="h-4 w-4 text-green-500" />}
                           </div>
                           <p className="text-xs text-gray-500">★ {ride.rating}</p>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useAuth, Vehicle, EmergencyContact } from "../contexts/AuthContext";
 import { useChat } from "../contexts/ChatContext";
 import { useRides } from "../contexts/RideContext";
@@ -9,7 +9,6 @@ import { Input } from "@/src/components/ui/input";
 import { Label } from "@/src/components/ui/label";
 import { User, Car, ShieldCheck, Mail, Phone, Info, Plus, Trash2, AlertTriangle, MessageSquare, Check, X, Clock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
 
 export default function Profile() {
   const { user, updateProfile } = useAuth();
@@ -39,26 +38,12 @@ export default function Profile() {
 
   const [activeTab, setActiveTab] = useState<'profile' | 'requests' | 'chats'>('profile');
 
-  // Sync local state when user object updates from AuthContext
-  useEffect(() => {
-    if (user) {
-      setName(user.name || "");
-      setPhone(user.phone || "");
-      setBio(user.bio || "");
-      setVehicles(user.vehicles || []);
-      setEmergencyContacts(user.emergencyContacts || []);
-    }
-  }, [user]);
-
   const handleSaveProfile = () => {
     updateProfile({ name, phone, bio });
   };
 
   const handleAddVehicle = () => {
-    if (!make || !model || !licensePlate) {
-      toast.error("Please fill in all required vehicle details (Make, Model, and License Plate)");
-      return;
-    }
+    if (!make || !model || !licensePlate) return;
     
     const newVehicle: Vehicle = {
       id: Math.random().toString(36).substring(2, 9),
@@ -118,9 +103,12 @@ export default function Profile() {
   const pendingRequests = joinRequests.filter(r => r.driverId === user.id && r.status === 'pending');
   const myChats = chats.map(chat => {
     const isPassenger = chat.passengerId === user.id;
+    const otherPartyId = isPassenger ? chat.driverId : chat.passengerId;
+    // In a real app, we'd fetch the other party's name. For now, we'll use a placeholder or find it from requests.
+    const request = joinRequests.find(r => r.passengerId === chat.passengerId && r.rideId === chat.rideId);
     return {
       ...chat,
-      otherPartyName: isPassenger ? chat.driverName : chat.passengerName
+      otherPartyName: isPassenger ? "Driver" : (request?.passengerName || "Passenger")
     };
   });
 
@@ -449,13 +437,7 @@ export default function Profile() {
                   <div 
                     key={chat.id} 
                     className="py-4 flex justify-between items-center hover:bg-gray-50 transition-colors cursor-pointer px-2 rounded-lg"
-                    onClick={() => {
-                      if (chat.rideType === 'daily-commute') {
-                        navigate('/daily-commute', { state: { selectedDriverId: chat.rideId } });
-                      } else {
-                        navigate(`/ride/${chat.rideId}`);
-                      }
-                    }}
+                    onClick={() => navigate(`/ride/${chat.rideId}`)}
                   >
                     <div className="flex items-center gap-4">
                       <div className="h-12 w-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold">

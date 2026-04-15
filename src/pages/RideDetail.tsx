@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { User, MapPin, Calendar, Clock, IndianRupee, Send, ShieldCheck, AlertCircle, Navigation, AlertTriangle, X, MessageSquare } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
@@ -28,15 +28,14 @@ export default function RideDetail() {
   const navigate = useNavigate();
   const { addNotification } = useNotifications();
   const { isAuthenticated, user } = useAuth();
-  const { rides, deleteRide } = useRides();
-  const { joinRequests, chats, sendJoinRequest, acceptJoinRequest, rejectJoinRequest, sendMessage, cleanupRideData } = useChat();
+  const { rides } = useRides();
+  const { joinRequests, chats, sendJoinRequest, sendMessage } = useChat();
   
   const ride = rides.find(r => r.id === id);
 
   const [messages, setMessages] = useState<{senderId: string, text: string, id?: string}[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [isDriver, setIsDriver] = useState(false);
-  const [selectedPassengerId, setSelectedPassengerId] = useState<string | null>(null);
   const [isCancelled, setIsCancelled] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [isSharingLocation, setIsSharingLocation] = useState(false);
@@ -44,14 +43,7 @@ export default function RideDetail() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const myRequest = joinRequests.find(r => r.rideId === id && r.passengerId === user?.id);
-  const rideChats = chats.filter(c => c.rideId === id);
-  const myChat = isDriver 
-    ? rideChats.find(c => c.passengerId === selectedPassengerId)
-    : rideChats.find(c => c.passengerId === user?.id);
-
-  const rideRequests = joinRequests.filter(r => r.rideId === id);
-  const pendingRequests = rideRequests.filter(r => r.status === 'pending');
-  const acceptedRequests = rideRequests.filter(r => r.status === 'accepted');
+  const myChat = chats.find(c => c.rideId === id && (c.passengerId === user?.id || c.driverId === user?.id));
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -125,26 +117,14 @@ export default function RideDetail() {
     }
   };
 
-  const handleCancel = async () => {
-    try {
-      if (isDriver) {
-        await cleanupRideData(ride.id);
-        await deleteRide(ride.id);
-        addNotification("Ride cancelled successfully. Passengers have been notified.");
-        toast.success("Ride cancelled successfully");
-        navigate("/");
-      } else {
-        // For passengers, we might just want to remove their join request or chat
-        // But for now, let's just set local state as per original logic or navigate away
-        setIsCancelled(true);
-        setShowCancelConfirm(false);
-        addNotification(`Booking cancelled successfully.`);
-        toast.success("Booking cancelled");
-        navigate("/");
-      }
-    } catch (error) {
-      console.error("Error cancelling ride:", error);
-      toast.error("Failed to cancel ride");
+  const handleCancel = () => {
+    setIsCancelled(true);
+    setShowCancelConfirm(false);
+    
+    if (isDriver) {
+      addNotification("Ride cancelled successfully. Passengers have been notified.");
+    } else {
+      addNotification(`Booking cancelled successfully.`);
     }
   };
 
@@ -197,14 +177,6 @@ export default function RideDetail() {
                   <Popup>Stop {i + 1}: {stop.name}</Popup>
                 </Marker>
               ))}
-              {ride.routeGeometry && (
-                <Polyline 
-                  positions={ride.routeGeometry} 
-                  color="#2563eb" 
-                  weight={5} 
-                  opacity={0.7}
-                />
-              )}
             </MapContainer>
           </div>
           <div className="p-6 md:p-8 space-y-6">
@@ -277,77 +249,39 @@ export default function RideDetail() {
                 </Button>
               </div>
             ) : isDriver ? (
-              <div className="space-y-6">
-                <div className="space-y-4">
-                  <h3 className="text-xl font-bold">Manage Your Ride</h3>
-                  
-                  <Button 
-                    className="w-full bg-green-600 hover:bg-green-700 h-12 text-lg"
-                    onClick={() => setIsRideActive(true)}
-                  >
-                    Start Journey
+              <div className="space-y-4">
+                <h3 className="text-xl font-bold">Manage Your Ride</h3>
+                <p className="text-gray-500 text-sm">You can manage requests from your profile dashboard.</p>
+                
+                <Button 
+                  className="w-full bg-green-600 hover:bg-green-700 h-12 text-lg"
+                  onClick={() => setIsRideActive(true)}
+                >
+                  Start Journey
+                </Button>
+
+                <Button 
+                  variant={isSharingLocation ? "outline" : "default"} 
+                  className={`w-full ${isSharingLocation ? "border-blue-600 text-blue-600" : ""}`}
+                  onClick={toggleLocationSharing}
+                >
+                  <Navigation className="mr-2 h-4 w-4" />
+                  {isSharingLocation ? "Stop Sharing Location" : "Share Live Location"}
+                </Button>
+
+                {!showCancelConfirm ? (
+                  <Button variant="destructive" className="w-full" onClick={() => setShowCancelConfirm(true)}>
+                    Cancel Ride
                   </Button>
-
-                  <Button 
-                    variant={isSharingLocation ? "outline" : "default"} 
-                    className={`w-full ${isSharingLocation ? "border-blue-600 text-blue-600" : ""}`}
-                    onClick={toggleLocationSharing}
-                  >
-                    <Navigation className="mr-2 h-4 w-4" />
-                    {isSharingLocation ? "Stop Sharing Location" : "Share Live Location"}
-                  </Button>
-                </div>
-
-                {pendingRequests.length > 0 && (
-                  <div className="space-y-3 pt-4 border-t">
-                    <h4 className="font-bold text-sm uppercase tracking-wider text-gray-500">Pending Requests</h4>
-                    {pendingRequests.map(req => (
-                      <div key={req.id} className="p-3 bg-blue-50 rounded-lg border border-blue-100 space-y-2">
-                        <p className="font-bold text-sm">{req.passengerName}</p>
-                        <div className="flex gap-2">
-                          <Button size="sm" className="flex-1 bg-blue-600" onClick={() => acceptJoinRequest(req)}>Accept</Button>
-                          <Button size="sm" variant="outline" className="flex-1 text-red-600" onClick={() => rejectJoinRequest(req.id)}>Reject</Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {acceptedRequests.length > 0 && (
-                  <div className="space-y-3 pt-4 border-t">
-                    <h4 className="font-bold text-sm uppercase tracking-wider text-gray-500">Passengers</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {acceptedRequests.map(req => (
-                        <Button 
-                          key={req.id}
-                          variant={selectedPassengerId === req.passengerId ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => setSelectedPassengerId(req.passengerId)}
-                          className="flex items-center gap-2"
-                        >
-                          <User className="h-3 w-3" />
-                          {req.passengerName}
-                        </Button>
-                      ))}
+                ) : (
+                  <div className="space-y-3 p-4 bg-red-50 rounded-lg border border-red-100">
+                    <p className="text-sm text-red-800 font-medium">Are you sure? This will refund all passengers and cannot be undone.</p>
+                    <div className="flex gap-2">
+                      <Button variant="destructive" className="flex-1" onClick={handleCancel}>Confirm</Button>
+                      <Button variant="outline" className="flex-1" onClick={() => setShowCancelConfirm(false)}>Back</Button>
                     </div>
                   </div>
                 )}
-
-                <div className="pt-4 border-t">
-                  {!showCancelConfirm ? (
-                    <Button variant="destructive" className="w-full" onClick={() => setShowCancelConfirm(true)}>
-                      Cancel Ride
-                    </Button>
-                  ) : (
-                    <div className="space-y-3 p-4 bg-red-50 rounded-lg border border-red-100">
-                      <p className="text-sm text-red-800 font-medium">Are you sure? This will refund all passengers and cannot be undone.</p>
-                      <div className="flex gap-2">
-                        <Button variant="destructive" className="flex-1" onClick={handleCancel}>Confirm</Button>
-                        <Button variant="outline" className="flex-1" onClick={() => setShowCancelConfirm(false)}>Back</Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
               </div>
             ) : !myRequest ? (
               <div className="space-y-4">
@@ -413,8 +347,7 @@ export default function RideDetail() {
           <Card className="flex flex-col h-[400px]">
             <CardHeader className="pb-3 border-b">
               <CardTitle className="text-lg flex items-center gap-2">
-                <MessageSquare className="h-5 w-5 text-blue-600" />
-                Chat with {isDriver ? acceptedRequests.find(r => r.passengerId === selectedPassengerId)?.passengerName || "Passenger" : ride.driver}
+                Chat Session
               </CardTitle>
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">

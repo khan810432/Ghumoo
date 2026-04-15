@@ -11,9 +11,7 @@ import {
   orderBy, 
   addDoc, 
   serverTimestamp,
-  getDoc,
-  getDocs,
-  deleteDoc
+  getDoc
 } from 'firebase/firestore';
 import { useAuth } from './AuthContext';
 import { toast } from 'sonner';
@@ -32,11 +30,8 @@ export interface JoinRequest {
 export interface Chat {
   id: string;
   rideId: string;
-  rideType: 'long-trip' | 'daily-commute';
   passengerId: string;
-  passengerName: string;
   driverId: string;
-  driverName: string;
   lastMessage: string;
   updatedAt: number;
   otherPartyName?: string;
@@ -57,7 +52,6 @@ interface ChatContextType {
   acceptJoinRequest: (request: JoinRequest) => Promise<void>;
   rejectJoinRequest: (requestId: string) => Promise<void>;
   sendMessage: (chatId: string, text: string) => Promise<void>;
-  cleanupRideData: (rideId: string) => Promise<void>;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -183,11 +177,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         const newChat: Chat = {
           id: chatId,
           rideId: request.rideId,
-          rideType: request.rideType,
           passengerId: request.passengerId,
-          passengerName: request.passengerName,
           driverId: request.driverId,
-          driverName: user?.name || "Driver",
           lastMessage: "Request accepted. You can now chat!",
           updatedAt: Date.now()
         };
@@ -244,26 +235,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const cleanupRideData = async (rideId: string) => {
-    try {
-      // 1. Delete all join requests for this ride
-      const requestsQuery = query(collection(db, 'joinRequests'), where('rideId', '==', rideId));
-      const requestsSnapshot = await getDocs(requestsQuery);
-      const deleteRequestsPromises = requestsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-      
-      // 2. Delete all chats for this ride
-      const chatsQuery = query(collection(db, 'chats'), where('rideId', '==', rideId));
-      const chatsSnapshot = await getDocs(chatsQuery);
-      const deleteChatsPromises = chatsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-
-      await Promise.all([...deleteRequestsPromises, ...deleteChatsPromises]);
-    } catch (error) {
-      console.error("Error cleaning up ride data:", error);
-    }
-  };
-
   return (
-    <ChatContext.Provider value={{ joinRequests, chats, sendJoinRequest, acceptJoinRequest, rejectJoinRequest, sendMessage, cleanupRideData }}>
+    <ChatContext.Provider value={{ joinRequests, chats, sendJoinRequest, acceptJoinRequest, rejectJoinRequest, sendMessage }}>
       {children}
     </ChatContext.Provider>
   );

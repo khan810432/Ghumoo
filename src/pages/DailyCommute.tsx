@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMapEvents, useMap } from "react-leaflet";
 import L from "leaflet";
 import { Car, MapPin, Navigation, Crosshair, Users, ShieldCheck, X, ArrowLeft, IndianRupee, AlertTriangle, MessageSquare } from "lucide-react";
@@ -59,10 +58,9 @@ function MapRecenter({ coords }: { coords: [number, number] | null }) {
 
 export default function DailyCommute() {
   const { user } = useAuth();
-  const location = useLocation();
   const { activeCommutes, startCommute, stopCommute, updateLocation } = useCommute();
   const { addNotification } = useNotifications();
-  const { joinRequests, chats, sendJoinRequest, acceptJoinRequest, rejectJoinRequest, sendMessage, cleanupRideData } = useChat();
+  const { joinRequests, chats, sendJoinRequest, acceptJoinRequest, rejectJoinRequest, sendMessage } = useChat();
   
   const [viewMode, setViewMode] = useState<'find' | 'offer'>('find');
   const [mapMode, setMapMode] = useState<'start' | 'end' | 'checkpoint' | null>(null);
@@ -74,29 +72,12 @@ export default function DailyCommute() {
   const [checkpoints, setCheckpoints] = useState<{name: string, coords: [number, number]}[]>([]);
   const [seats, setSeats] = useState(2);
   const [fare, setFare] = useState<number | "">("");
-  const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
-
-  // Auto-select first vehicle if available
-  useEffect(() => {
-    if (user?.vehicles && user.vehicles.length > 0 && !selectedVehicleId) {
-      setSelectedVehicleId(user.vehicles[0].id);
-    }
-  }, [user, selectedVehicleId]);
-
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [availableRoutes, setAvailableRoutes] = useState<any[]>([]);
   const [selectedRouteIndex, setSelectedRouteIndex] = useState<number>(0);
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
   
-  // Handle pre-selected driver from navigation state
-  useEffect(() => {
-    if (location.state?.selectedDriverId) {
-      setSelectedDriverId(location.state.selectedDriverId);
-      setViewMode('find');
-    }
-  }, [location.state]);
-
   // Timer for request timeouts
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -174,9 +155,6 @@ export default function DailyCommute() {
     fetchCurrentLocation();
   }, []);
 
-  const lastUpdateRef = useRef<number>(0);
-  const lastCoordsRef = useRef<[number, number] | null>(null);
-
   useEffect(() => {
     if (myActiveCommute) {
       if ("geolocation" in navigator) {
@@ -185,22 +163,7 @@ export default function DailyCommute() {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
             setUserLocation([lat, lng]);
-            
-            const now = Date.now();
-            // Throttle updates to once every 30 seconds OR if moved significantly
-            const shouldUpdate = !lastUpdateRef.current || 
-                               (now - lastUpdateRef.current > 30000) ||
-                               (lastCoordsRef.current && 
-                                (Math.abs(lastCoordsRef.current[0] - lat) > 0.0001 || 
-                                 Math.abs(lastCoordsRef.current[1] - lng) > 0.0001));
-
-            if (shouldUpdate && activeCommutes.some(c => c.id === myActiveCommute.id)) {
-              lastUpdateRef.current = now;
-              lastCoordsRef.current = [lat, lng];
-              updateLocation(myActiveCommute.id, [lat, lng]).catch(err => {
-                console.warn("Silent failure updating location (likely commute ended):", err);
-              });
-            }
+            updateLocation(myActiveCommute.id, [lat, lng]);
           },
           (error) => console.error("Error watching position:", error),
           { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
@@ -286,9 +249,6 @@ export default function DailyCommute() {
       ? selectedRoute.geometry.coordinates.map((c: any) => [c[1], c[0]] as [number, number]) 
       : undefined;
 
-    const selectedVehicle = user?.vehicles?.find(v => v.id === selectedVehicleId);
-    const carInfo = selectedVehicle ? `${selectedVehicle.year} ${selectedVehicle.make} ${selectedVehicle.model}` : "Your Vehicle";
-
     try {
       await startCommute({
         driverId: user.id,
@@ -303,8 +263,7 @@ export default function DailyCommute() {
         startName,
         endName,
         seats,
-        fare: fare === "" ? 0 : Number(fare),
-        car: carInfo
+        fare: fare === "" ? 0 : Number(fare)
       });
       toast.success("You are now active! Passengers can see your route.");
     } catch (e) {
@@ -315,7 +274,6 @@ export default function DailyCommute() {
   const handleStopCommute = async () => {
     if (myActiveCommute) {
       try {
-        await cleanupRideData(myActiveCommute.id);
         await stopCommute(myActiveCommute.id);
         toast.success("You are now offline.");
       } catch (e) {
@@ -339,11 +297,10 @@ export default function DailyCommute() {
     }
 
     try {
-      await sendJoinRequest(commuteId, 'daily-commute', driverId);
+      await sendJoinRequest(commuteId, driverId, driverName, 'daily-commute');
       addNotification(`${user.name} has requested to join your live ride.`);
       toast.success(`Ride request sent to ${driverName}! They will be notified.`);
     } catch (e) {
-      console.error("Error requesting ride:", e);
       toast.error("Failed to request ride.");
     }
   };
@@ -605,27 +562,6 @@ export default function DailyCommute() {
                         <Input type="number" min="0" placeholder="e.g. 50" value={fare} onChange={(e) => setFare(e.target.value === "" ? "" : parseInt(e.target.value))} />
                       </div>
                     </div>
-
-                    <div className="space-y-2">
-                      <Label>Select Vehicle</Label>
-                      <div className="relative">
-                        <Car className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                        <select 
-                          required
-                          className="w-full pl-9 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                          value={selectedVehicleId}
-                          onChange={(e) => setSelectedVehicleId(e.target.value)}
-                        >
-                          <option value="">Select a vehicle</option>
-                          {user?.vehicles?.map(v => (
-                            <option key={v.id} value={v.id}>{v.year} {v.make} {v.model} ({v.licensePlate})</option>
-                          ))}
-                        </select>
-                      </div>
-                      {(!user?.vehicles || user.vehicles.length === 0) && (
-                        <p className="text-xs text-amber-600">Please add a vehicle in your profile first.</p>
-                      )}
-                    </div>
                     
                     {mapMode && (
                       <div className="p-3 bg-blue-50 text-blue-700 rounded-lg text-sm flex items-center gap-2 animate-pulse">
@@ -648,9 +584,9 @@ export default function DailyCommute() {
                 </Button>
                 <CardTitle className="text-xl flex items-center gap-2">
                   <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm">
-                    {selectedDriver.driverName?.charAt(0).toUpperCase() || "D"}
+                    {selectedDriver.driverName.charAt(0).toUpperCase()}
                   </div>
-                  {selectedDriver.driverName || "Driver"}'s Route
+                  {selectedDriver.driverName}'s Route
                 </CardTitle>
                 <CardDescription>View live location and route details.</CardDescription>
               </CardHeader>
@@ -698,15 +634,8 @@ export default function DailyCommute() {
                           <p className="font-bold text-lg flex items-center gap-1"><IndianRupee className="h-4 w-4 text-green-600" /> {selectedDriver.fare}</p>
                         </div>
                       )}
-                      {selectedDriver.car && (
-                        <div>
-                          <p className="text-sm text-gray-500">Vehicle</p>
-                          <p className="font-bold text-lg flex items-center gap-1"><Car className="h-4 w-4 text-gray-400" /> {selectedDriver.car}</p>
-                        </div>
-                      )}
                     </div>
                     {(() => {
-                      if (user && selectedDriver.driverId === user.id) return <Button variant="outline" onClick={() => { setViewMode('offer'); setSelectedDriverId(null); }}>Manage My Ride</Button>;
                       if (myRequest?.status === 'pending') return <Button disabled className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-0 opacity-100">Request Pending</Button>;
                       if (myRequest?.status === 'accepted') return <Button disabled className="bg-green-100 text-green-700 hover:bg-green-100 border-0 opacity-100">Request Accepted</Button>;
                       if (myRequest?.status === 'rejected') return <Button disabled className="bg-red-100 text-red-700 hover:bg-red-100 border-0 opacity-100">Rejected</Button>;
@@ -796,30 +725,19 @@ export default function DailyCommute() {
                         <div className="flex justify-between items-start mb-2">
                           <div className="flex items-center gap-2">
                             <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm">
-                              {commute.driverName?.charAt(0).toUpperCase() || "D"}
+                              {commute.driverName.charAt(0).toUpperCase()}
                             </div>
                             <div>
-                              <div className="flex items-center gap-2">
-                                <p className="font-semibold text-gray-900 text-sm">{commute.driverName || "Driver"}</p>
-                                {user && commute.driverId === user.id && (
-                                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
-                                    Your Ride
-                                  </span>
-                                )}
-                              </div>
+                              <p className="font-semibold text-gray-900 text-sm">{commute.driverName}</p>
                               <div className="flex items-center text-xs text-gray-500 gap-3">
                                 <span className="flex items-center"><Users className="h-3 w-3 mr-1" /> {commute.seats} seats</span>
                                 {commute.fare !== undefined && commute.fare > 0 && (
                                   <span className="flex items-center text-green-600 font-medium"><IndianRupee className="h-3 w-3 mr-0.5" /> {commute.fare}</span>
                                 )}
-                                {commute.car && (
-                                  <span className="flex items-center text-gray-400"><Car className="h-3 w-3 mr-1" /> {commute.car}</span>
-                                )}
                               </div>
                             </div>
                           </div>
                           {(() => {
-                            if (user && commute.driverId === user.id) return <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setViewMode('offer'); setSelectedDriverId(null); }}>Manage</Button>;
                             const myReq = joinRequests.find(r => r.rideId === commute.id && r.passengerId === user?.id);
                             if (myReq?.status === 'pending') return <Button size="sm" disabled className="bg-amber-100 text-amber-700 hover:bg-amber-100 border-0 opacity-100">Pending</Button>;
                             if (myReq?.status === 'accepted') return <Button size="sm" disabled className="bg-green-100 text-green-700 hover:bg-green-100 border-0 opacity-100">Accepted</Button>;
@@ -905,56 +823,46 @@ export default function DailyCommute() {
             )}
 
             {/* Render all active commutes OR only the selected one */}
-            {viewMode === 'find' && (selectedDriver ? [selectedDriver] : nearbyCommutes).map(commute => {
-              const currentPos = commute.currentCoords || commute.startCoords;
-              if (!currentPos || isNaN(currentPos[0]) || isNaN(currentPos[1])) return null;
-              if (!commute.startCoords || isNaN(commute.startCoords[0]) || isNaN(commute.startCoords[1])) return null;
-              if (!commute.endCoords || isNaN(commute.endCoords[0]) || isNaN(commute.endCoords[1])) return null;
-
-              return (
-                <React.Fragment key={commute.id}>
-                  <Marker position={commute.startCoords}>
-                    <Popup>Start: {commute.startName}</Popup>
+            {viewMode === 'find' && (selectedDriver ? [selectedDriver] : nearbyCommutes).map(commute => (
+              <React.Fragment key={commute.id}>
+                <Marker position={commute.startCoords}>
+                  <Popup>Start: {commute.startName}</Popup>
+                </Marker>
+                <Marker position={commute.currentCoords || commute.startCoords} icon={driverIcon}>
+                  <Popup>
+                    <div className="text-center">
+                      <p className="font-bold">{commute.driverName}</p>
+                      <p className="text-xs text-gray-500 mb-1">{commute.seats} seats available</p>
+                      {commute.fare !== undefined && commute.fare > 0 && (
+                        <p className="text-xs text-green-600 font-bold mb-2">₹{commute.fare} per seat</p>
+                      )}
+                      <p className="text-xs text-blue-600 mb-2 font-semibold">Live Location</p>
+                      {(() => {
+                        const myReq = joinRequests.find(r => r.rideId === commute.id && r.passengerId === user?.id);
+                        if (myReq?.status === 'pending') return <Button size="sm" disabled className="w-full text-xs h-7 bg-amber-100 text-amber-700 hover:bg-amber-100 border-0 opacity-100">Pending</Button>;
+                        if (myReq?.status === 'accepted') return <Button size="sm" disabled className="w-full text-xs h-7 bg-green-100 text-green-700 hover:bg-green-100 border-0 opacity-100">Accepted</Button>;
+                        if (myReq?.status === 'rejected') return <Button size="sm" disabled className="w-full text-xs h-7 bg-red-100 text-red-700 hover:bg-red-100 border-0 opacity-100">Rejected</Button>;
+                        
+                        return <Button size="sm" className="w-full text-xs h-7" onClick={() => handleRequestRide(commute.id, commute.driverId, commute.driverName)}>Request Ride</Button>;
+                      })()}
+                    </div>
+                  </Popup>
+                </Marker>
+                <Marker position={commute.endCoords}>
+                  <Popup>Destination: {commute.endName}</Popup>
+                </Marker>
+                {commute.checkpoints?.map((cp, idx) => (
+                  <Marker key={`active-cp-${commute.id}-${idx}`} position={cp.coords}>
+                    <Popup>Checkpoint: {cp.name}</Popup>
                   </Marker>
-                  <Marker position={currentPos} icon={driverIcon}>
-                    <Popup>
-                      <div className="text-center">
-                        <p className="font-bold">{commute.driverName}</p>
-                        <p className="text-xs text-gray-500 mb-1">{commute.seats} seats available</p>
-                        {commute.fare !== undefined && commute.fare > 0 && (
-                          <p className="text-xs text-green-600 font-bold mb-2">₹{commute.fare} per seat</p>
-                        )}
-                        <p className="text-xs text-blue-600 mb-2 font-semibold">Live Location</p>
-                        {(() => {
-                          const myReq = joinRequests.find(r => r.rideId === commute.id && r.passengerId === user?.id);
-                          if (myReq?.status === 'pending') return <Button size="sm" disabled className="w-full text-xs h-7 bg-amber-100 text-amber-700 hover:bg-amber-100 border-0 opacity-100">Pending</Button>;
-                          if (myReq?.status === 'accepted') return <Button size="sm" disabled className="w-full text-xs h-7 bg-green-100 text-green-700 hover:bg-green-100 border-0 opacity-100">Accepted</Button>;
-                          if (myReq?.status === 'rejected') return <Button size="sm" disabled className="w-full text-xs h-7 bg-red-100 text-red-700 hover:bg-red-100 border-0 opacity-100">Rejected</Button>;
-                          
-                          return <Button size="sm" className="w-full text-xs h-7" onClick={() => handleRequestRide(commute.id, commute.driverId, commute.driverName)}>Request Ride</Button>;
-                        })()}
-                      </div>
-                    </Popup>
-                  </Marker>
-                  <Marker position={commute.endCoords}>
-                    <Popup>Destination: {commute.endName}</Popup>
-                  </Marker>
-                  {commute.checkpoints?.map((cp, idx) => {
-                    if (!cp.coords || isNaN(cp.coords[0]) || isNaN(cp.coords[1])) return null;
-                    return (
-                      <Marker key={`active-cp-${commute.id}-${idx}`} position={cp.coords}>
-                        <Popup>Checkpoint: {cp.name}</Popup>
-                      </Marker>
-                    );
-                  })}
-                  {commute.routeGeometry ? (
-                    <Polyline positions={commute.routeGeometry} color={selectedDriver ? "blue" : "green"} weight={selectedDriver ? 6 : 5} opacity={0.7} />
-                  ) : (
-                    <Polyline positions={[commute.startCoords, ...(commute.checkpoints?.map(c => c.coords) || []), commute.endCoords]} color={selectedDriver ? "blue" : "green"} weight={selectedDriver ? 6 : 4} opacity={0.6} />
-                  )}
-                </React.Fragment>
-              );
-            })}
+                ))}
+                {commute.routeGeometry ? (
+                  <Polyline positions={commute.routeGeometry} color={selectedDriver ? "blue" : "green"} weight={selectedDriver ? 6 : 5} opacity={0.7} />
+                ) : (
+                  <Polyline positions={[commute.startCoords, ...(commute.checkpoints?.map(c => c.coords) || []), commute.endCoords]} color={selectedDriver ? "blue" : "green"} weight={selectedDriver ? 6 : 4} opacity={0.6} />
+                )}
+              </React.Fragment>
+            ))}
           </MapContainer>
         </div>
         )}

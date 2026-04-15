@@ -10,7 +10,6 @@ import L from "leaflet";
 import { toast } from "sonner";
 import "leaflet/dist/leaflet.css";
 import { useRides } from "../contexts/RideContext";
-import { useAuth } from "../contexts/AuthContext";
 import { getCurrentLocation } from "../lib/locationUtils";
 
 // Fix for default marker icon in react-leaflet
@@ -48,7 +47,6 @@ function MapRecenter({ coords }: { coords: [number, number] | null }) {
 
 export default function Home() {
   const navigate = useNavigate();
-  const { user } = useAuth();
   const { rides } = useRides();
   const [search, setSearch] = useState({ from: "", to: "", date: "" });
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
@@ -151,6 +149,8 @@ export default function Home() {
   };
 
   const filteredRides = rides.filter(r => {
+    if (r.isLongTrip) return false;
+
     // Check if the ride is within 24 hours from the current time
     const rideDateTime = new Date(`${r.date}T${r.time}`);
     const now = new Date();
@@ -318,7 +318,7 @@ export default function Home() {
       <div className="max-w-5xl mx-auto pt-4 space-y-6 w-full px-4 md:px-0">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight">
-            {isSearching ? "Search Results" : "Daily Commutes"}
+            {isSearching ? "Search Results" : "Recently Posted Rides"}
           </h2>
           <span className="text-sm font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
             {filteredRides.length} rides found
@@ -348,14 +348,7 @@ export default function Home() {
                   {/* Top Section: Time & Price */}
                   <div className="p-6 pb-4 flex justify-between items-start bg-gradient-to-b from-gray-50/50 to-white">
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <div className="font-bold text-xl text-gray-900">{ride.time}</div>
-                        {user && ride.driverId === user.id && (
-                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
-                            Your Ride
-                          </span>
-                        )}
-                      </div>
+                      <div className="font-bold text-xl text-gray-900">{ride.time}</div>
                       <div className="text-sm font-medium text-gray-500 flex items-center gap-1">
                         <Calendar className="h-3.5 w-3.5" /> {ride.date}
                       </div>
@@ -394,7 +387,7 @@ export default function Home() {
                         )}
                       </div>
                       <div>
-                        <p className="text-sm font-bold text-gray-900">{ride.driver || "Driver"}</p>
+                        <p className="text-sm font-bold text-gray-900">{ride.driver}</p>
                         <div className="flex items-center text-xs font-medium text-gray-500 mt-0.5">
                           <Star className="h-3 w-3 text-amber-400 fill-amber-400 mr-1" />
                           {ride.rating} • {ride.car}

@@ -73,52 +73,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let unsubscribeUser: (() => void) | undefined;
-
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        // Listen to user profile from Firestore in real-time
+        // Fetch user profile from Firestore
         const docRef = doc(db, 'users', firebaseUser.uid);
-        unsubscribeUser = onSnapshot(docRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const userData = docSnap.data() as User;
-            // Parse JSON strings back to objects
-            if (userData.vehicles && typeof userData.vehicles === 'string') {
-              try {
-                userData.vehicles = JSON.parse(userData.vehicles);
-              } catch (e) {
-                console.error("Error parsing vehicles:", e);
-                userData.vehicles = [];
-              }
-            }
-            if (userData.emergencyContacts && typeof userData.emergencyContacts === 'string') {
-              try {
-                userData.emergencyContacts = JSON.parse(userData.emergencyContacts);
-              } catch (e) {
-                console.error("Error parsing contacts:", e);
-                userData.emergencyContacts = [];
-              }
-            }
-            setUser(userData);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const userData = docSnap.data() as User;
+          // Parse JSON strings back to objects
+          if (userData.vehicles && typeof userData.vehicles === 'string') {
+            userData.vehicles = JSON.parse(userData.vehicles);
           }
-        }, (error) => {
-          console.error("Error listening to user profile:", error);
-        });
-      } else {
-        if (unsubscribeUser) {
-          unsubscribeUser();
+          if (userData.emergencyContacts && typeof userData.emergencyContacts === 'string') {
+            userData.emergencyContacts = JSON.parse(userData.emergencyContacts);
+          }
+          setUser(userData);
         }
+      } else {
         setUser(null);
       }
       setLoading(false);
     });
 
-    return () => {
-      unsubscribeAuth();
-      if (unsubscribeUser) {
-        unsubscribeUser();
-      }
-    };
+    return () => unsubscribeAuth();
   }, []);
 
   useEffect(() => {
