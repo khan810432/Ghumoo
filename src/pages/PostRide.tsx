@@ -451,18 +451,15 @@ export default function PostRide() {
                   <div className="space-y-2">
                     <Label>Date</Label>
                     <Popover>
-                      <PopoverTrigger asChild>
-                        <div className="relative cursor-pointer">
-                          <CalendarIcon className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "w-full pl-9 justify-start text-left font-normal h-10",
-                              !formData.date && "text-muted-foreground"
-                            )}
-                          >
+                      <PopoverTrigger className="w-full">
+                        <div className="relative w-full flex items-center">
+                          <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 z-10" />
+                          <div className={cn(
+                            "flex h-10 w-full items-center justify-start rounded-md border border-input bg-background pl-9 px-3 py-2 text-sm ring-offset-background font-normal transition-colors hover:bg-muted/50 text-left",
+                            !formData.date && "text-muted-foreground"
+                          )}>
                             {formData.date ? format(parse(formData.date, 'yyyy-MM-dd', new Date()), "PPP") : <span>Pick a date</span>}
-                          </Button>
+                          </div>
                         </div>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0" align="start">

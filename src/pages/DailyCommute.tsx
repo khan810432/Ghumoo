@@ -174,6 +174,9 @@ export default function DailyCommute() {
     fetchCurrentLocation();
   }, []);
 
+  const lastUpdateRef = useRef<number>(0);
+  const lastCoordsRef = useRef<[number, number] | null>(null);
+
   useEffect(() => {
     if (myActiveCommute) {
       if ("geolocation" in navigator) {
@@ -183,8 +186,17 @@ export default function DailyCommute() {
             const lng = position.coords.longitude;
             setUserLocation([lat, lng]);
             
-            // Only update if the commute still exists in our local state
-            if (activeCommutes.some(c => c.id === myActiveCommute.id)) {
+            const now = Date.now();
+            // Throttle updates to once every 30 seconds OR if moved significantly
+            const shouldUpdate = !lastUpdateRef.current || 
+                               (now - lastUpdateRef.current > 30000) ||
+                               (lastCoordsRef.current && 
+                                (Math.abs(lastCoordsRef.current[0] - lat) > 0.0001 || 
+                                 Math.abs(lastCoordsRef.current[1] - lng) > 0.0001));
+
+            if (shouldUpdate && activeCommutes.some(c => c.id === myActiveCommute.id)) {
+              lastUpdateRef.current = now;
+              lastCoordsRef.current = [lat, lng];
               updateLocation(myActiveCommute.id, [lat, lng]).catch(err => {
                 console.warn("Silent failure updating location (likely commute ended):", err);
               });
@@ -327,10 +339,11 @@ export default function DailyCommute() {
     }
 
     try {
-      await sendJoinRequest(commuteId, driverId, driverName, 'daily-commute');
+      await sendJoinRequest(commuteId, 'daily-commute', driverId);
       addNotification(`${user.name} has requested to join your live ride.`);
       toast.success(`Ride request sent to ${driverName}! They will be notified.`);
     } catch (e) {
+      console.error("Error requesting ride:", e);
       toast.error("Failed to request ride.");
     }
   };
