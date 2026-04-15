@@ -1,0 +1,7 @@
+{
+  "name": "Ghumoo",
+  "description": "Community-Driven Ridesharing Platform",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}

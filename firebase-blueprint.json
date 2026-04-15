@@ -1,0 +1,86 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the application",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The user's unique ID" },
+        "name": { "type": "string", "description": "The user's name" },
+        "email": { "type": "string", "description": "The user's email address" },
+        "role": { "type": "string", "enum": ["user", "admin"], "description": "The user's role" },
+        "status": { "type": "string", "enum": ["Pending", "Verified", "Rejected"], "description": "Verification status" },
+        "password": { "type": "string", "description": "The user's password (stored for demo purposes)" },
+        "phone": { "type": "string", "description": "The user's phone number" },
+        "bio": { "type": "string", "description": "The user's bio" },
+        "vehicles": { "type": "string", "description": "JSON stringified array of vehicles" },
+        "emergencyContacts": { "type": "string", "description": "JSON stringified array of emergency contacts" }
+      },
+      "required": ["id", "name", "email", "role", "status"]
+    },
+    "Ride": {
+      "title": "Ride",
+      "description": "A scheduled ride posted by a user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "driver": { "type": "string" },
+        "driverId": { "type": "string" },
+        "seats": { "type": "number" },
+        "price": { "type": "number" },
+        "rating": { "type": "number" },
+        "verified": { "type": "boolean" },
+        "car": { "type": "string" },
+        "coords": { "type": "array", "items": { "type": "number" } },
+        "stops": { "type": "string", "description": "JSON stringified array of stops" },
+        "distance": { "type": "number" },
+        "isLongTrip": { "type": "boolean" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "from", "to", "date", "time", "driver", "seats", "price", "coords"]
+    },
+    "Commute": {
+      "title": "Commute",
+      "description": "A live daily commute",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "driverId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "startCoords": { "type": "array", "items": { "type": "number" } },
+        "endCoords": { "type": "array", "items": { "type": "number" } },
+        "currentCoords": { "type": "array", "items": { "type": "number" } },
+        "startName": { "type": "string" },
+        "endName": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "completed"] },
+        "seats": { "type": "number" },
+        "fare": { "type": "number" },
+        "checkpoints": { "type": "string", "description": "JSON stringified array" },
+        "routeGeometry": { "type": "string", "description": "JSON stringified array" },
+        "distance": { "type": "number" },
+        "duration": { "type": "number" },
+        "requests": { "type": "string", "description": "JSON stringified array of requests" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "driverId", "driverName", "startCoords", "endCoords", "currentCoords", "startName", "endName", "status", "seats"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles"
+    },
+    "/rides/{rideId}": {
+      "schema": { "$ref": "#/entities/Ride" },
+      "description": "Stores scheduled rides"
+    },
+    "/commutes/{commuteId}": {
+      "schema": { "$ref": "#/entities/Commute" },
+      "description": "Stores live daily commutes"
+    }
+  }
+}

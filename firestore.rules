@@ -1,0 +1,100 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required)
+    //   - email: string (required)
+    //   - role: string (required, 'user' or 'admin')
+    //   - status: string (required, 'Pending', 'Verified', 'Rejected')
+    //   - password: string (optional, stored for demo)
+    //   - phone: string (optional)
+    //   - bio: string (optional)
+    //   - vehicles: string (optional, JSON)
+    //   - emergencyContacts: string (optional, JSON)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (request.auth.token.email == "mdsecondary810432@gmail.com" && request.auth.token.email_verified == true) ||
+        request.auth.token.email == "admin@ghumoo.com"
+      );
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidUser(data) {
+      return data.id is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.role in ['user', 'admin'] &&
+             data.status in ['Pending', 'Verified', 'Rejected'] &&
+             (!('password' in data) || (data.password is string && data.password.size() < 100)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() < 20)) &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() < 1000)) &&
+             (!('vehicles' in data) || (data.vehicles is string && data.vehicles.size() < 5000)) &&
+             (!('emergencyContacts' in data) || (data.emergencyContacts is string && data.emergencyContacts.size() < 5000));
+    }
+
+    match /users/{userId} {
+      // Anyone can read users for now (since it's a ride sharing app and we need to see drivers/riders)
+      // In a real app, we'd restrict this to public profiles.
+      allow read: if true;
+      
+      // Allow users to create their own profile, or admins to create any profile
+      allow create: if (isOwner(userId) || isAdmin()) && 
+                    isValidUser(request.resource.data) &&
+                    (request.resource.data.role == 'user' || isAdmin());
+                    
+      // Allow users to update their own profile, or admins to update any profile
+      allow update: if (isOwner(userId) || isAdmin()) && 
+                    isValidUser(request.resource.data) &&
+                    (request.resource.data.role == resource.data.role || isAdmin());
+                    
+      // Allow admins to delete users, or users to delete themselves
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    match /rides/{rideId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.driverId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.driverId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.driverId == request.auth.uid;
+      
+      match /messages/{messageId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && 
+                      request.resource.data.sender is string &&
+                      request.resource.data.text is string &&
+                      request.resource.data.text.size() > 0 &&
+                      request.resource.data.text.size() < 1000;
+      }
+    }
+
+    match /commutes/{commuteId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.driverId == request.auth.uid;
+      allow update: if isAuthenticated(); // Allow passengers to update requests
+      allow delete: if isAuthenticated() && resource.data.driverId == request.auth.uid;
+    }
+  }
+}
