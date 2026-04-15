@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { auth, db } from '../firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
@@ -12,8 +12,6 @@ import {
   collection, 
   doc, 
   setDoc, 
-  getDoc, 
-  getDocs, 
   updateDoc, 
   deleteDoc,
   onSnapshot
@@ -73,48 +71,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsubscribeUser: (() => void) | undefined;
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        // Fetch user profile from Firestore
+        // Listen to user profile from Firestore in real-time
         const docRef = doc(db, 'users', firebaseUser.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const userData = docSnap.data() as User;
-          // Parse JSON strings back to objects
-          if (userData.vehicles && typeof userData.vehicles === 'string') {
-            userData.vehicles = JSON.parse(userData.vehicles);
+        unsubscribeUser = onSnapshot(docRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const userData = docSnap.data() as User;
+            // Parse JSON strings back to objects
+            if (userData.vehicles && typeof userData.vehicles === 'string') {
+              try {
+                userData.vehicles = JSON.parse(userData.vehicles);
+              } catch (e) {
+                userData.vehicles = [];
+              }
+            }
+            if (userData.emergencyContacts && typeof userData.emergencyContacts === 'string') {
+              try {
+                userData.emergencyContacts = JSON.parse(userData.emergencyContacts);
+              } catch (e) {
+                userData.emergencyContacts = [];
+              }
+            }
+            setUser(userData);
           }
-          if (userData.emergencyContacts && typeof userData.emergencyContacts === 'string') {
-            userData.emergencyContacts = JSON.parse(userData.emergencyContacts);
-          }
-          setUser(userData);
-        }
+          setLoading(false);
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
+          setLoading(false);
+        });
       } else {
+        if (unsubscribeUser) unsubscribeUser();
         setUser(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeUser) unsubscribeUser();
+    };
   }, []);
 
   useEffect(() => {
     // Listen to all users for admin dashboard
-    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+    const path = 'users';
+    const unsubscribeUsers = onSnapshot(collection(db, path), (snapshot) => {
       const usersData: User[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data() as User;
         if (data.vehicles && typeof data.vehicles === 'string') {
-          data.vehicles = JSON.parse(data.vehicles);
+          try {
+            data.vehicles = JSON.parse(data.vehicles);
+          } catch (e) {}
         }
         if (data.emergencyContacts && typeof data.emergencyContacts === 'string') {
-          data.emergencyContacts = JSON.parse(data.emergencyContacts);
+          try {
+            data.emergencyContacts = JSON.parse(data.emergencyContacts);
+          } catch (e) {}
         }
         usersData.push(data);
       });
       setUsers(usersData);
     }, (error) => {
-      console.error("Error fetching users:", error);
+      handleFirestoreError(error, OperationType.LIST, path);
     });
 
     return () => unsubscribeUsers();
@@ -148,7 +170,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         status: 'Pending'
       };
 
-      await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+      const path = `users/${firebaseUser.uid}`;
+      try {
+        await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+      } catch (e) {
+        handleFirestoreError(e, OperationType.WRITE, path);
+      }
       toast.success('Account created successfully');
     } catch (error: any) {
       toast.error(error.message || 'Failed to create account');
@@ -167,10 +194,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const verifyUser = async () => {
     if (user) {
+      const path = `users/${user.id}`;
       try {
         await updateDoc(doc(db, 'users', user.id), { status: 'Verified' });
         toast.success('User verified');
       } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, path);
         toast.error('Failed to verify user');
       }
     }
@@ -178,6 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateProfile = async (updates: Partial<User>) => {
     if (user) {
+      const path = `users/${user.id}`;
       try {
         const firestoreUpdates: any = { ...updates };
         if (updates.vehicles) {
@@ -189,26 +219,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await updateDoc(doc(db, 'users', user.id), firestoreUpdates);
         toast.success('Profile updated successfully');
       } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, path);
         toast.error('Failed to update profile');
       }
     }
   };
 
   const deleteUser = async (userId: string) => {
+    const path = `users/${userId}`;
     try {
       await deleteDoc(doc(db, 'users', userId));
       toast.success('User deleted successfully');
     } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
       toast.error('Failed to delete user');
     }
   };
 
   const updateUserPassword = async (userId: string, newPassword: string) => {
+    const path = `users/${userId}`;
     try {
       await updateDoc(doc(db, 'users', userId), { password: newPassword });
       toast.success('User password updated successfully in database');
       toast.info('Note: This only updates the display password, not the actual Firebase Auth password.');
     } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
       toast.error('Failed to update user password');
     }
   };

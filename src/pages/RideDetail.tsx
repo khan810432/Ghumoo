@@ -8,12 +8,13 @@ import { Input } from "@/src/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { useNotifications } from "../contexts/NotificationContext";
 import { useAuth } from "../contexts/AuthContext";
-import { useRides } from "../contexts/RideContext";
+import { useRides, Ride } from "../contexts/RideContext";
 import { useChat } from "../contexts/ChatContext";
 import { toast } from "sonner";
 import L from "leaflet";
-import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
-import { db } from "../firebase";
+import { collection, query, orderBy, onSnapshot, updateDoc, doc } from "firebase/firestore";
+import { db, handleFirestoreError, OperationType } from "../firebase";
+import { watchLocation } from "../lib/locationUtils";
 
 // Fix for default marker icon in react-leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -36,14 +37,17 @@ export default function RideDetail() {
   const [messages, setMessages] = useState<{senderId: string, text: string, id?: string}[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [isDriver, setIsDriver] = useState(false);
-  const [isCancelled, setIsCancelled] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
-  const [isSharingLocation, setIsSharingLocation] = useState(false);
-  const [isRideActive, setIsRideActive] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const watchUnsubscribeRef = useRef<(() => void) | null>(null);
 
   const myRequest = joinRequests.find(r => r.rideId === id && r.passengerId === user?.id);
   const myChat = chats.find(c => c.rideId === id && (c.passengerId === user?.id || c.driverId === user?.id));
+
+  // Derived states from Firestore ride document
+  const isRideActive = ride?.status === 'active';
+  const isSharingLocation = ride?.isSharingLocation || false;
+  const isCancelled = ride?.status === 'cancelled';
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -58,6 +62,38 @@ export default function RideDetail() {
       setIsDriver(true);
     }
   }, [ride, user]);
+
+  useEffect(() => {
+    if (isDriver && isSharingLocation && id) {
+      watchUnsubscribeRef.current = watchLocation(
+        async (result) => {
+          const path = `rides/${id}`;
+          try {
+            await updateDoc(doc(db, 'rides', id), {
+              coords: result.coords
+            });
+          } catch (e) {
+            console.error("Failed to update live location", e);
+          }
+        },
+        (error) => {
+          console.error("Location tracking error", error);
+          toast.error("Failed to track live location");
+        }
+      );
+    } else {
+      if (watchUnsubscribeRef.current) {
+        watchUnsubscribeRef.current();
+        watchUnsubscribeRef.current = null;
+      }
+    }
+
+    return () => {
+      if (watchUnsubscribeRef.current) {
+        watchUnsubscribeRef.current();
+      }
+    };
+  }, [isDriver, isSharingLocation, id]);
 
   useEffect(() => {
     if (!myChat || !myChat.id) return;
@@ -117,23 +153,56 @@ export default function RideDetail() {
     }
   };
 
-  const handleCancel = () => {
-    setIsCancelled(true);
-    setShowCancelConfirm(false);
-    
-    if (isDriver) {
-      addNotification("Ride cancelled successfully. Passengers have been notified.");
-    } else {
-      addNotification(`Booking cancelled successfully.`);
+  const handleCancel = async () => {
+    if (!id) return;
+    const path = `rides/${id}`;
+    try {
+      await updateDoc(doc(db, 'rides', id), { status: 'cancelled' });
+      setShowCancelConfirm(false);
+      
+      if (isDriver) {
+        addNotification("Ride cancelled successfully. Passengers have been notified.");
+      } else {
+        addNotification(`Booking cancelled successfully.`);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
 
-  const toggleLocationSharing = () => {
-    setIsSharingLocation(!isSharingLocation);
-    if (!isSharingLocation) {
-      addNotification("Started sharing live location with passengers.");
-    } else {
-      addNotification("Stopped sharing live location.");
+  const toggleLocationSharing = async () => {
+    if (!id) return;
+    const path = `rides/${id}`;
+    const newState = !isSharingLocation;
+    try {
+      await updateDoc(doc(db, 'rides', id), { isSharingLocation: newState });
+      if (newState) {
+        addNotification("Started sharing live location with passengers.");
+      } else {
+        addNotification("Stopped sharing live location.");
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleStartJourney = async () => {
+    if (!id) return;
+    const path = `rides/${id}`;
+    try {
+      await updateDoc(doc(db, 'rides', id), { status: 'active' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
+    }
+  };
+
+  const handleEndJourney = async () => {
+    if (!id) return;
+    const path = `rides/${id}`;
+    try {
+      await updateDoc(doc(db, 'rides', id), { status: 'completed' });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, path);
     }
   };
 
@@ -244,7 +313,7 @@ export default function RideDetail() {
                 <p className="text-xs text-center text-gray-500">
                   Clicking SOS will call 112 and share your live location with your emergency contacts.
                 </p>
-                <Button onClick={() => setIsRideActive(false)} variant="outline" className="w-full mt-4">
+                <Button onClick={() => handleEndJourney()} variant="outline" className="w-full mt-4">
                   End Journey
                 </Button>
               </div>
@@ -255,7 +324,7 @@ export default function RideDetail() {
                 
                 <Button 
                   className="w-full bg-green-600 hover:bg-green-700 h-12 text-lg"
-                  onClick={() => setIsRideActive(true)}
+                  onClick={handleStartJourney}
                 >
                   Start Journey
                 </Button>
@@ -319,7 +388,7 @@ export default function RideDetail() {
                 <div className="pt-4 border-t mt-4 space-y-3">
                   <Button 
                     className="w-full bg-green-600 hover:bg-green-700 h-12 text-lg"
-                    onClick={() => setIsRideActive(true)}
+                    onClick={handleStartJourney}
                   >
                     Start Ride
                   </Button>

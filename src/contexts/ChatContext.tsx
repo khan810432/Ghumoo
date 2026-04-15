@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { 
   collection, 
   doc, 
@@ -68,12 +68,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    const path = 'joinRequests';
     const q = query(
-      collection(db, 'joinRequests'),
+      collection(db, path),
       where('passengerId', '==', user.id)
     );
     const q2 = query(
-      collection(db, 'joinRequests'),
+      collection(db, path),
       where('driverId', '==', user.id)
     );
 
@@ -83,6 +84,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         const otherRequests = prev.filter(r => r.driverId === user.id);
         return [...passengerRequests, ...otherRequests];
       });
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
     });
 
     const unsub2 = onSnapshot(q2, (snapshot) => {
@@ -91,6 +94,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         const otherRequests = prev.filter(r => r.passengerId === user.id);
         return [...driverRequests, ...otherRequests];
       });
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
     });
 
     return () => {
@@ -106,12 +111,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    const path = 'chats';
     const q = query(
-      collection(db, 'chats'),
+      collection(db, path),
       where('passengerId', '==', user.id)
     );
     const q2 = query(
-      collection(db, 'chats'),
+      collection(db, path),
       where('driverId', '==', user.id)
     );
 
@@ -121,6 +127,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         const otherChats = prev.filter(c => c.driverId === user.id);
         return [...passengerChats, ...otherChats];
       });
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
     });
 
     const unsub2 = onSnapshot(q2, (snapshot) => {
@@ -129,6 +137,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         const otherChats = prev.filter(c => c.passengerId === user.id);
         return [...driverChats, ...otherChats];
       });
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
     });
 
     return () => {
@@ -152,17 +162,19 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       createdAt: Date.now()
     };
 
+    const path = `joinRequests/${id}`;
     try {
       await setDoc(doc(db, 'joinRequests', id), newRequest);
       toast.success("Join request sent!");
     } catch (error) {
-      console.error("Error sending join request:", error);
+      handleFirestoreError(error, OperationType.WRITE, path);
       toast.error("Failed to send join request");
       throw error;
     }
   };
 
   const acceptJoinRequest = async (request: JoinRequest) => {
+    const requestPath = `joinRequests/${request.id}`;
     try {
       // 1. Update request status
       await updateDoc(doc(db, 'joinRequests', request.id), {
@@ -171,6 +183,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       // 2. Create a chat session
       const chatId = `${request.rideId}_${request.passengerId}`;
+      const chatPath = `chats/${chatId}`;
       const chatDoc = await getDoc(doc(db, 'chats', chatId));
       
       if (!chatDoc.exists()) {
@@ -195,20 +208,21 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       toast.success("Request accepted!");
     } catch (error) {
-      console.error("Error accepting request:", error);
+      handleFirestoreError(error, OperationType.WRITE, requestPath);
       toast.error("Failed to accept request");
       throw error;
     }
   };
 
   const rejectJoinRequest = async (requestId: string) => {
+    const path = `joinRequests/${requestId}`;
     try {
       await updateDoc(doc(db, 'joinRequests', requestId), {
         status: 'rejected'
       });
       toast.success("Request rejected");
     } catch (error) {
-      console.error("Error rejecting request:", error);
+      handleFirestoreError(error, OperationType.UPDATE, path);
       toast.error("Failed to reject request");
       throw error;
     }
@@ -216,6 +230,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const sendMessage = async (chatId: string, text: string) => {
     if (!user) return;
+
+    const chatPath = `chats/${chatId}`;
+    const messagePath = `chats/${chatId}/messages`;
+
+    // Optimistic update for the chat list
+    setChats(prev => prev.map(c => c.id === chatId ? { ...c, lastMessage: text, updatedAt: Date.now() } : c));
 
     try {
       await addDoc(collection(db, 'chats', chatId, 'messages'), {
@@ -230,7 +250,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         updatedAt: Date.now()
       });
     } catch (error) {
-      console.error("Error sending message:", error);
+      handleFirestoreError(error, OperationType.WRITE, messagePath);
       toast.error("Failed to send message");
     }
   };

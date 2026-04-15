@@ -1,44 +1,105 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { toast } from 'sonner';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, addDoc, onSnapshot, query, where, orderBy, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { useAuth } from './AuthContext';
 
 export type Notification = {
   id: string;
+  userId: string;
   text: string;
   time: string;
   read: boolean;
+  createdAt: number;
 };
 
 interface NotificationContextType {
   notifications: Notification[];
-  addNotification: (text: string) => void;
-  markAllAsRead: () => void;
-  clearNotifications: () => void;
+  addNotification: (text: string, userId?: string) => Promise<void>;
+  markAllAsRead: () => Promise<void>;
+  clearNotifications: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
-  const [notifications, setNotifications] = useState<Notification[]>([
-    { id: '1', text: 'Welcome to Ghumoo!', time: 'Just now', read: false }
-  ]);
+  const { user } = useAuth();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
 
-  const addNotification = (text: string) => {
-    const newNotif = {
-      id: Date.now().toString(),
-      text,
-      time: 'Just now',
-      read: false
-    };
-    setNotifications(prev => [newNotif, ...prev]);
-    toast(text);
+  useEffect(() => {
+    if (!user) {
+      setNotifications([]);
+      return;
+    }
+
+    const path = 'notifications';
+    const q = query(
+      collection(db, path),
+      where('userId', '==', user.id),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const notifs: Notification[] = [];
+      snapshot.forEach((doc) => {
+        notifs.push({ id: doc.id, ...doc.data() } as Notification);
+      });
+      setNotifications(notifs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, path);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const addNotification = async (text: string, userId?: string) => {
+    const targetUserId = userId || user?.id;
+    if (!targetUserId) return;
+
+    const path = 'notifications';
+    try {
+      await addDoc(collection(db, path), {
+        userId: targetUserId,
+        text,
+        time: 'Just now',
+        read: false,
+        createdAt: Date.now()
+      });
+      if (targetUserId === user?.id) {
+        toast(text);
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
   };
 
-  const markAllAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  const markAllAsRead = async () => {
+    if (!user) return;
+    
+    const unreadNotifs = notifications.filter(n => !n.read);
+    const promises = unreadNotifs.map(n => 
+      updateDoc(doc(db, 'notifications', n.id), { read: true })
+    );
+
+    try {
+      await Promise.all(promises);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'notifications');
+    }
   };
 
-  const clearNotifications = () => {
-    setNotifications([]);
+  const clearNotifications = async () => {
+    if (!user) return;
+    
+    const promises = notifications.map(n => 
+      deleteDoc(doc(db, 'notifications', n.id))
+    );
+
+    try {
+      await Promise.all(promises);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'notifications');
+    }
   };
 
   return (

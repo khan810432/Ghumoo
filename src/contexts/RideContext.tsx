@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, doc, setDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
 
 export interface Ride {
@@ -33,7 +33,8 @@ export function RideProvider({ children }: { children: ReactNode }) {
   const [rides, setRides] = useState<Ride[]>([]);
 
   useEffect(() => {
-    const q = query(collection(db, 'rides'), orderBy('createdAt', 'desc'));
+    const path = 'rides';
+    const q = query(collection(db, path), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ridesData: Ride[] = [];
       snapshot.forEach((doc) => {
@@ -49,7 +50,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
       });
       setRides(ridesData);
     }, (error) => {
-      console.error("Error fetching rides:", error);
+      handleFirestoreError(error, OperationType.LIST, path);
     });
 
     return () => unsubscribe();
@@ -67,10 +68,11 @@ export function RideProvider({ children }: { children: ReactNode }) {
       newRide.stops = JSON.stringify(newRide.stops);
     }
 
+    const path = `rides/${id}`;
     try {
       await setDoc(doc(db, 'rides', id), newRide);
     } catch (error) {
-      console.error("Error adding ride:", error);
+      handleFirestoreError(error, OperationType.WRITE, path);
       throw error;
     }
   };
