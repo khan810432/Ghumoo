@@ -151,15 +151,12 @@ export default function Home() {
   const filteredRides = rides.filter(r => {
     if (r.isLongTrip) return false;
 
-    // Check if the ride is within 24 hours from the current time
+    // Check if the ride is in the future
     const rideDateTime = new Date(`${r.date}T${r.time}`);
     const now = new Date();
+    
+    // Filter out rides that are more than 12 hours in the past
     const diffHours = (rideDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
-    
-    // Only show rides that are within 24 hours from now
-    if (diffHours > 24) return false;
-    
-    // Optional: filter out rides that are far in the past (e.g., > 12 hours ago)
     if (diffHours < -12) return false;
 
     return (!search.from || r.from.toLowerCase().includes(search.from.toLowerCase()) || search.from === "Selected Location") &&

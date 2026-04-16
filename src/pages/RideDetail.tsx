@@ -40,6 +40,7 @@ export default function RideDetail() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const watchUnsubscribeRef = useRef<(() => void) | null>(null);
+  const lastLocationUpdateRef = useRef<number>(0);
 
   const myRequest = joinRequests.find(r => r.rideId === id && r.passengerId === user?.id);
   const myChat = chats.find(c => c.rideId === id && (c.passengerId === user?.id || c.driverId === user?.id));
@@ -67,6 +68,11 @@ export default function RideDetail() {
     if (isDriver && isSharingLocation && id) {
       watchUnsubscribeRef.current = watchLocation(
         async (result) => {
+          const now = Date.now();
+          // Only update Firestore every 10 seconds to save quota
+          if (now - lastLocationUpdateRef.current < 10000) return;
+          
+          lastLocationUpdateRef.current = now;
           const path = `rides/${id}`;
           try {
             await updateDoc(doc(db, 'rides', id), {
@@ -329,6 +335,10 @@ export default function RideDetail() {
                   Start Journey
                 </Button>
 
+                <Button onClick={handleSOS} variant="destructive" className="w-full h-12 text-lg flex items-center justify-center gap-2">
+                  <AlertTriangle className="h-5 w-5" /> SOS EMERGENCY
+                </Button>
+
                 <Button 
                   variant={isSharingLocation ? "outline" : "default"} 
                   className={`w-full ${isSharingLocation ? "border-blue-600 text-blue-600" : ""}`}
@@ -386,6 +396,9 @@ export default function RideDetail() {
                 <p className="text-gray-500 text-sm">You are all set for your ride to {ride.to}.</p>
                 
                 <div className="pt-4 border-t mt-4 space-y-3">
+                  <Button onClick={handleSOS} variant="destructive" className="w-full h-12 text-lg flex items-center justify-center gap-2">
+                    <AlertTriangle className="h-5 w-5" /> SOS EMERGENCY
+                  </Button>
                   <Button 
                     className="w-full bg-green-600 hover:bg-green-700 h-12 text-lg"
                     onClick={handleStartJourney}
