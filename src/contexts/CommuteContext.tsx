@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db } from '../firebase';
 import { collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
 
 export interface CommuteRequest {
@@ -27,6 +27,7 @@ export interface CommuteRoute {
   seats: number;
   fare?: number;
   requests?: CommuteRequest[];
+  vehicle?: any;
   updatedAt?: number;
 }
 
@@ -45,8 +46,7 @@ export function CommuteProvider({ children }: { children: React.ReactNode }) {
   const [activeCommutes, setActiveCommutes] = useState<CommuteRoute[]>([]);
 
   useEffect(() => {
-    const path = 'commutes';
-    const q = query(collection(db, path), orderBy('updatedAt', 'desc'));
+    const q = query(collection(db, 'commutes'), orderBy('updatedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const commutesData: CommuteRoute[] = [];
       snapshot.forEach((doc) => {
@@ -60,11 +60,14 @@ export function CommuteProvider({ children }: { children: React.ReactNode }) {
         if (data.requests && typeof data.requests === 'string') {
           try { data.requests = JSON.parse(data.requests); } catch (e) { data.requests = []; }
         }
+        if (data.vehicle && typeof data.vehicle === 'string') {
+          try { data.vehicle = JSON.parse(data.vehicle); } catch (e) { data.vehicle = undefined; }
+        }
         commutesData.push(data as CommuteRoute);
       });
       setActiveCommutes(commutesData);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
+      console.error("Error fetching commutes:", error);
     });
 
     return () => unsubscribe();
@@ -82,35 +85,33 @@ export function CommuteProvider({ children }: { children: React.ReactNode }) {
     if (newCommute.checkpoints) newCommute.checkpoints = JSON.stringify(newCommute.checkpoints);
     if (newCommute.routeGeometry) newCommute.routeGeometry = JSON.stringify(newCommute.routeGeometry);
     if (newCommute.requests) newCommute.requests = JSON.stringify(newCommute.requests);
+    if (newCommute.vehicle) newCommute.vehicle = JSON.stringify(newCommute.vehicle);
 
-    const path = `commutes/${id}`;
     try {
       await setDoc(doc(db, 'commutes', id), newCommute);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      console.error("Error starting commute:", error);
       throw error;
     }
   };
 
   const stopCommute = async (id: string) => {
-    const path = `commutes/${id}`;
     try {
       await deleteDoc(doc(db, 'commutes', id));
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+      console.error("Error stopping commute:", error);
       throw error;
     }
   };
 
   const updateLocation = async (id: string, coords: [number, number]) => {
-    const path = `commutes/${id}`;
     try {
       await updateDoc(doc(db, 'commutes', id), { 
         currentCoords: coords,
         updatedAt: Date.now()
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
+      console.error("Error updating location:", error);
       throw error;
     }
   };
@@ -139,14 +140,13 @@ export function CommuteProvider({ children }: { children: React.ReactNode }) {
       });
     }
 
-    const path = `commutes/${commuteId}`;
     try {
       await updateDoc(doc(db, 'commutes', commuteId), { 
         requests: JSON.stringify(updatedRequests),
         updatedAt: Date.now()
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
+      console.error("Error requesting commute:", error);
       throw error;
     }
   };
@@ -159,14 +159,13 @@ export function CommuteProvider({ children }: { children: React.ReactNode }) {
       r.id === requestId ? { ...r, status, updatedAt: Date.now() } : r
     );
 
-    const path = `commutes/${commuteId}`;
     try {
       await updateDoc(doc(db, 'commutes', commuteId), { 
         requests: JSON.stringify(updatedRequests),
         updatedAt: Date.now()
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
+      console.error("Error updating request status:", error);
       throw error;
     }
   };

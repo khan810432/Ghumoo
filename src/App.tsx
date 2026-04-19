@@ -16,14 +16,13 @@ import { NotificationProvider } from "./contexts/NotificationContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { RideProvider } from "./contexts/RideContext";
 import { CommuteProvider } from "./contexts/CommuteContext";
-import { ChatProvider } from "./contexts/ChatContext";
 import DailyCommute from "./pages/DailyCommute";
 import Profile from "./pages/Profile";
 import LongTrips from "./pages/LongTrips";
 
 // Protected Route Component
-function ProtectedRoute({ children, requireAdmin = false }: { children: React.ReactNode, requireAdmin?: boolean }) {
-  const { isAuthenticated, isAdmin } = useAuth();
+function ProtectedRoute({ children, requireAdmin = false, requireVerified = false }: { children: React.ReactNode, requireAdmin?: boolean, requireVerified?: boolean }) {
+  const { isAuthenticated, isAdmin, user } = useAuth();
   
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -31,6 +30,10 @@ function ProtectedRoute({ children, requireAdmin = false }: { children: React.Re
   
   if (requireAdmin && !isAdmin) {
     return <Navigate to="/" replace />;
+  }
+  
+  if (requireVerified && user?.status !== 'Verified') {
+    return <Navigate to="/onboarding" replace />;
   }
   
   return <>{children}</>;
@@ -41,41 +44,39 @@ export default function App() {
     <AuthProvider>
       <RideProvider>
         <CommuteProvider>
-          <ChatProvider>
-            <NotificationProvider>
-              <BrowserRouter>
-                <Routes>
-                  <Route path="/" element={<Layout />}>
-                    <Route index element={<Home />} />
-                    <Route path="login" element={<Login />} />
-                    <Route path="daily-commute" element={<DailyCommute />} />
-                    <Route path="long-trips" element={<LongTrips />} />
-                    <Route path="profile" element={
-                      <ProtectedRoute>
-                        <Profile />
-                      </ProtectedRoute>
-                    } />
-                    <Route path="onboarding" element={
+          <NotificationProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route path="/" element={<Layout />}>
+                  <Route index element={<Home />} />
+                  <Route path="login" element={<Login />} />
+                  <Route path="daily-commute" element={<DailyCommute />} />
+                  <Route path="long-trips" element={<LongTrips />} />
+                  <Route path="profile" element={
                     <ProtectedRoute>
-                      <Onboarding />
+                      <Profile />
                     </ProtectedRoute>
                   } />
-                  <Route path="post-ride" element={
-                    <ProtectedRoute>
-                      <PostRide />
-                    </ProtectedRoute>
-                  } />
-                  <Route path="ride/:id" element={<RideDetail />} />
-                  <Route path="admin-portal" element={
-                    <ProtectedRoute requireAdmin={true}>
-                      <AdminDashboard />
-                    </ProtectedRoute>
-                  } />
-                </Route>
-              </Routes>
-            </BrowserRouter>
-          </NotificationProvider>
-        </ChatProvider>
+                  <Route path="onboarding" element={
+                  <ProtectedRoute>
+                    <Onboarding />
+                  </ProtectedRoute>
+                } />
+                <Route path="post-ride" element={
+                  <ProtectedRoute requireVerified={true}>
+                    <PostRide />
+                  </ProtectedRoute>
+                } />
+                <Route path="ride/:id" element={<RideDetail />} />
+                <Route path="admin-portal" element={
+                  <ProtectedRoute requireAdmin={true}>
+                    <AdminDashboard />
+                  </ProtectedRoute>
+                } />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </NotificationProvider>
         </CommuteProvider>
       </RideProvider>
     </AuthProvider>

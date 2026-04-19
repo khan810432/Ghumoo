@@ -79,30 +79,3 @@ export const getCurrentLocation = (
     );
   });
 };
-
-export const watchLocation = (
-  onUpdate: (result: LocationResult) => void,
-  onError: (error: GeolocationPositionError) => void,
-  useHighAccuracy = true
-): (() => void) => {
-  if (!("geolocation" in navigator)) {
-    onError({ code: 0, message: "Geolocation not supported", PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 } as GeolocationPositionError);
-    return () => {};
-  }
-
-  const watchId = navigator.geolocation.watchPosition(
-    async (position) => {
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
-      onUpdate({ coords: [lat, lng], name: "Current Location" });
-    },
-    onError,
-    {
-      enableHighAccuracy: useHighAccuracy,
-      timeout: 10000,
-      maximumAge: 0
-    }
-  );
-
-  return () => navigator.geolocation.clearWatch(watchId);
-};

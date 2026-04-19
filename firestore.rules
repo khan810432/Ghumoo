@@ -96,56 +96,5 @@ service cloud.firestore {
       allow update: if isAuthenticated(); // Allow passengers to update requests
       allow delete: if isAuthenticated() && resource.data.driverId == request.auth.uid;
     }
-
-    match /joinRequests/{requestId} {
-      allow read: if isAuthenticated() && (
-        request.auth.uid == resource.data.passengerId || 
-        request.auth.uid == resource.data.driverId
-      );
-      allow create: if isAuthenticated() && request.resource.data.passengerId == request.auth.uid;
-      allow update: if isAuthenticated() && (
-        request.auth.uid == resource.data.passengerId || 
-        request.auth.uid == resource.data.driverId
-      );
-      allow delete: if isAuthenticated() && (
-        request.auth.uid == resource.data.passengerId || 
-        request.auth.uid == resource.data.driverId
-      );
-    }
-
-    match /chats/{chatId} {
-      allow read: if isAuthenticated() && (
-        request.auth.uid == resource.data.passengerId || 
-        request.auth.uid == resource.data.driverId
-      );
-      allow create: if isAuthenticated() && (
-        request.auth.uid == request.resource.data.passengerId || 
-        request.auth.uid == request.resource.data.driverId
-      );
-      allow update: if isAuthenticated() && (
-        request.auth.uid == resource.data.passengerId || 
-        request.auth.uid == resource.data.driverId
-      );
-
-      match /messages/{messageId} {
-        allow read: if isAuthenticated() && (
-          request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.passengerId || 
-          request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.driverId
-        );
-        allow create: if isAuthenticated() && 
-                      request.resource.data.senderId == request.auth.uid &&
-                      (
-                        request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.passengerId || 
-                        request.auth.uid == get(/databases/$(database)/documents/chats/$(chatId)).data.driverId
-                      );
-      }
-    }
-
-    match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAuthenticated() && request.auth.uid == resource.data.userId;
-      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
-    }
   }
 }

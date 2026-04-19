@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db } from '../firebase';
 import { collection, doc, setDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
 
 export interface Ride {
@@ -15,6 +15,7 @@ export interface Ride {
   rating: number;
   verified: boolean;
   car: string;
+  vehicle?: any;
   coords: [number, number];
   stops?: { id: string; name: string; coords: [number, number] | null }[];
   distance?: number;
@@ -33,8 +34,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
   const [rides, setRides] = useState<Ride[]>([]);
 
   useEffect(() => {
-    const path = 'rides';
-    const q = query(collection(db, path), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'rides'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ridesData: Ride[] = [];
       snapshot.forEach((doc) => {
@@ -46,11 +46,18 @@ export function RideProvider({ children }: { children: ReactNode }) {
             data.stops = [];
           }
         }
+        if (data.vehicle && typeof data.vehicle === 'string') {
+          try {
+            data.vehicle = JSON.parse(data.vehicle);
+          } catch (e) {
+            data.vehicle = undefined;
+          }
+        }
         ridesData.push(data as Ride);
       });
       setRides(ridesData);
     }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
+      console.error("Error fetching rides:", error);
     });
 
     return () => unsubscribe();
@@ -67,12 +74,14 @@ export function RideProvider({ children }: { children: ReactNode }) {
     if (newRide.stops) {
       newRide.stops = JSON.stringify(newRide.stops);
     }
+    if (newRide.vehicle) {
+      newRide.vehicle = JSON.stringify(newRide.vehicle);
+    }
 
-    const path = `rides/${id}`;
     try {
       await setDoc(doc(db, 'rides', id), newRide);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      console.error("Error adding ride:", error);
       throw error;
     }
   };

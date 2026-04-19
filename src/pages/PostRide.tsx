@@ -68,6 +68,7 @@ export default function PostRide() {
   const [toCoords, setToCoords] = useState<[number, number] | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
   const [isLongTrip, setIsLongTrip] = useState(false);
+  const [selectedVehicle, setSelectedVehicle] = useState<string>("");
 
   useEffect(() => {
     const initLocation = async () => {
@@ -210,6 +211,8 @@ export default function PostRide() {
 
     setLoading(true);
     
+    const vehicleObj = user?.vehicles?.find((v: any, i: number) => (v.id || i.toString()) === selectedVehicle);
+
     try {
       // Add ride to context
       await addRide({
@@ -223,7 +226,8 @@ export default function PostRide() {
         driverId: user?.id || "anonymous",
         rating: 5.0, // Default new user rating
         verified: true,
-        car: "Your Vehicle", // Default or could add a field for this
+        car: vehicleObj ? `${vehicleObj.make} ${vehicleObj.model}` : "Your Vehicle",
+        vehicle: vehicleObj,
         coords: fromCoords,
         stops: stops,
         distance: distance || undefined,
@@ -372,27 +376,29 @@ export default function PostRide() {
                   <div className="space-y-2">
                     <Label>Date</Label>
                     <div className="relative">
-                      <Calendar className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                       <Input 
                         required 
                         type="date" 
-                        className="pl-9" 
+                        className="pr-10 w-full relative z-10 bg-transparent [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer" 
                         value={formData.date}
+                        onClick={(e: any) => e.target.showPicker && e.target.showPicker()}
                         onChange={(e) => setFormData({...formData, date: e.target.value})}
                       />
+                      <Calendar className="absolute right-3 top-3 h-5 w-5 text-blue-600 pointer-events-none z-0" />
                     </div>
                   </div>
                   <div className="space-y-2">
                     <Label>Time</Label>
                     <div className="relative">
-                      <Clock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                       <Input 
                         required 
                         type="time" 
-                        className="pl-9" 
+                        className="pr-10 w-full relative z-10 bg-transparent [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:cursor-pointer" 
                         value={formData.time}
+                        onClick={(e: any) => e.target.showPicker && e.target.showPicker()}
                         onChange={(e) => setFormData({...formData, time: e.target.value})}
                       />
+                      <Clock className="absolute right-3 top-3 h-5 w-5 text-blue-600 pointer-events-none z-0" />
                     </div>
                   </div>
                 </div>
@@ -429,6 +435,23 @@ export default function PostRide() {
                       />
                     </div>
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Select Vehicle</Label>
+                  <select 
+                    className="w-full h-12 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer hover:border-gray-400"
+                    value={selectedVehicle}
+                    onChange={(e) => setSelectedVehicle(e.target.value)}
+                  >
+                    <option value="">-- No vehicle selected --</option>
+                    {user?.vehicles?.map((v: any, i: number) => (
+                      <option key={i} value={v.id || i.toString()}>{v.make} {v.model} ({v.licensePlate})</option>
+                    ))}
+                  </select>
+                  {(!user?.vehicles || user.vehicles.length === 0) && (
+                    <p className="text-xs text-amber-600 mt-1">You have not added any vehicles to your profile.</p>
+                  )}
                 </div>
 
                 <Button type="submit" className="w-full h-12 text-lg bg-blue-600 hover:bg-blue-700" disabled={loading}>

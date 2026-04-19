@@ -2,19 +2,17 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { User, MapPin, Calendar, Clock, IndianRupee, Send, ShieldCheck, AlertCircle, Navigation, AlertTriangle, X, MessageSquare } from "lucide-react";
+import { User, MapPin, Calendar, Clock, IndianRupee, Send, ShieldCheck, AlertCircle, Navigation, AlertTriangle } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { useNotifications } from "../contexts/NotificationContext";
 import { useAuth } from "../contexts/AuthContext";
-import { useRides, Ride } from "../contexts/RideContext";
-import { useChat } from "../contexts/ChatContext";
+import { useRides } from "../contexts/RideContext";
 import { toast } from "sonner";
 import L from "leaflet";
-import { collection, query, orderBy, onSnapshot, updateDoc, doc } from "firebase/firestore";
-import { db, handleFirestoreError, OperationType } from "../firebase";
-import { watchLocation } from "../lib/locationUtils";
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase";
 
 // Fix for default marker icon in react-leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -30,25 +28,18 @@ export default function RideDetail() {
   const { addNotification } = useNotifications();
   const { isAuthenticated, user } = useAuth();
   const { rides } = useRides();
-  const { joinRequests, chats, sendJoinRequest, sendMessage } = useChat();
   
   const ride = rides.find(r => r.id === id);
 
-  const [messages, setMessages] = useState<{senderId: string, text: string, id?: string}[]>([]);
+  const [messages, setMessages] = useState<{sender: string, text: string, id?: string}[]>([]);
   const [newMessage, setNewMessage] = useState("");
-  const [isDriver, setIsDriver] = useState(false);
+  const [bookingStatus, setBookingStatus] = useState<'idle' | 'pending_approval' | 'confirmed'>('idle');
+  const [isDriver, setIsDriver] = useState(false); // Toggle for demo purposes
+  const [isCancelled, setIsCancelled] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [isSharingLocation, setIsSharingLocation] = useState(false);
+  const [isRideActive, setIsRideActive] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const watchUnsubscribeRef = useRef<(() => void) | null>(null);
-  const lastLocationUpdateRef = useRef<number>(0);
-
-  const myRequest = joinRequests.find(r => r.rideId === id && r.passengerId === user?.id);
-  const myChat = chats.find(c => c.rideId === id && (c.passengerId === user?.id || c.driverId === user?.id));
-
-  // Derived states from Firestore ride document
-  const isRideActive = ride?.status === 'active';
-  const isSharingLocation = ride?.isSharingLocation || false;
-  const isCancelled = ride?.status === 'cancelled';
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -59,67 +50,30 @@ export default function RideDetail() {
   }, [messages]);
 
   useEffect(() => {
-    if (ride && user && ride.driverId === user.id) {
+    if (ride && user && ride.driver === user.name) {
       setIsDriver(true);
     }
   }, [ride, user]);
 
   useEffect(() => {
-    if (isDriver && isSharingLocation && id) {
-      watchUnsubscribeRef.current = watchLocation(
-        async (result) => {
-          const now = Date.now();
-          // Only update Firestore every 10 seconds to save quota
-          if (now - lastLocationUpdateRef.current < 10000) return;
-          
-          lastLocationUpdateRef.current = now;
-          const path = `rides/${id}`;
-          try {
-            await updateDoc(doc(db, 'rides', id), {
-              coords: result.coords
-            });
-          } catch (e) {
-            console.error("Failed to update live location", e);
-          }
-        },
-        (error) => {
-          console.error("Location tracking error", error);
-          toast.error("Failed to track live location");
-        }
-      );
-    } else {
-      if (watchUnsubscribeRef.current) {
-        watchUnsubscribeRef.current();
-        watchUnsubscribeRef.current = null;
-      }
-    }
-
-    return () => {
-      if (watchUnsubscribeRef.current) {
-        watchUnsubscribeRef.current();
-      }
-    };
-  }, [isDriver, isSharingLocation, id]);
-
-  useEffect(() => {
-    if (!myChat || !myChat.id) return;
+    if (!ride || !id) return;
 
     const q = query(
-      collection(db, "chats", myChat.id, "messages"),
-      orderBy("createdAt", "asc")
+      collection(db, "rides", id, "messages"),
+      orderBy("timestamp", "asc")
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedMessages = snapshot.docs.map(doc => ({
         id: doc.id,
-        senderId: doc.data().senderId,
+        sender: doc.data().sender,
         text: doc.data().text,
       }));
       setMessages(fetchedMessages);
     });
 
     return () => unsubscribe();
-  }, [myChat]);
+  }, [ride, id]);
 
   if (!ride) {
     return (
@@ -133,82 +87,58 @@ export default function RideDetail() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !user || !myChat) return;
+    if (!newMessage.trim() || !user || !id) return;
     
     const messageText = newMessage;
     setNewMessage("");
     
     try {
-      await sendMessage(myChat.id, messageText);
+      await addDoc(collection(db, "rides", id, "messages"), {
+        sender: user.name || "User",
+        text: messageText,
+        timestamp: serverTimestamp()
+      });
     } catch (error) {
       console.error("Error sending message:", error);
+      toast.error("Failed to send message");
     }
   };
 
-  const handleRequestJoin = async () => {
+  const handleRequestJoin = () => {
     if (!isAuthenticated) {
       toast.error("Please login or sign up to request a ride.");
       navigate("/login");
       return;
     }
-    try {
-      await sendJoinRequest(ride.id, 'long-trip', ride.driverId);
-      addNotification("Booking request sent! You can chat once the driver accepts.");
-    } catch (e) {
-      // Error handled in context
+    
+    if (user?.status !== 'Verified') {
+      toast.error("Please verify your profile to request a ride.");
+      navigate("/onboarding");
+      return;
+    }
+
+    setBookingStatus('confirmed');
+    addNotification("Booking request sent! You can now chat with the driver.");
+  };
+
+  const handleCancel = () => {
+    setIsCancelled(true);
+    setShowCancelConfirm(false);
+    
+    if (isDriver) {
+      addNotification("Ride cancelled successfully. Passengers have been notified.");
+    } else {
+      addNotification(`Booking cancelled successfully.`);
+      setBookingStatus('idle');
     }
   };
 
-  const handleCancel = async () => {
-    if (!id) return;
-    const path = `rides/${id}`;
-    try {
-      await updateDoc(doc(db, 'rides', id), { status: 'cancelled' });
-      setShowCancelConfirm(false);
-      
-      if (isDriver) {
-        addNotification("Ride cancelled successfully. Passengers have been notified.");
-      } else {
-        addNotification(`Booking cancelled successfully.`);
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
-    }
-  };
-
-  const toggleLocationSharing = async () => {
-    if (!id) return;
-    const path = `rides/${id}`;
-    const newState = !isSharingLocation;
-    try {
-      await updateDoc(doc(db, 'rides', id), { isSharingLocation: newState });
-      if (newState) {
-        addNotification("Started sharing live location with passengers.");
-      } else {
-        addNotification("Stopped sharing live location.");
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
-    }
-  };
-
-  const handleStartJourney = async () => {
-    if (!id) return;
-    const path = `rides/${id}`;
-    try {
-      await updateDoc(doc(db, 'rides', id), { status: 'active' });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
-    }
-  };
-
-  const handleEndJourney = async () => {
-    if (!id) return;
-    const path = `rides/${id}`;
-    try {
-      await updateDoc(doc(db, 'rides', id), { status: 'completed' });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, path);
+  const toggleLocationSharing = () => {
+    setIsSharingLocation(!isSharingLocation);
+    if (!isSharingLocation) {
+      addNotification("Started sharing live location with passengers.");
+    } else {
+      addNotification("Stopped sharing live location.");
     }
   };
 
@@ -217,6 +147,7 @@ export default function RideDetail() {
       duration: 10000,
       style: { background: '#ef4444', color: 'white', fontWeight: 'bold' }
     });
+    // In a real app, this would trigger a native phone call intent or API call
     window.location.href = "tel:112";
   };
 
@@ -259,10 +190,10 @@ export default function RideDetail() {
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">{ride.from} to {ride.to}</h1>
                 <div className="mt-2 flex items-center gap-2">
-                  <span className="text-sm text-gray-500">Role:</span>
-                  <span className="text-sm font-medium px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full">
-                    {isDriver ? "Driver" : "Passenger"}
-                  </span>
+                  <span className="text-sm text-gray-500">Demo Toggle:</span>
+                  <Button variant="outline" size="sm" onClick={() => setIsDriver(!isDriver)}>
+                    View as {isDriver ? "Passenger" : "Driver"}
+                  </Button>
                 </div>
               </div>
               <div className="text-2xl font-bold text-blue-600 flex items-center">
@@ -296,7 +227,7 @@ export default function RideDetail() {
                   <h3 className="text-lg font-bold">{ride.driver}</h3>
                   {ride.verified && <ShieldCheck className="h-5 w-5 text-green-500" />}
                 </div>
-                <p className="text-sm text-gray-500">★ {ride.rating} • Verified Driver</p>
+                <p className="text-sm text-gray-500">★ {ride.rating} • New Driver</p>
                 <p className="text-sm text-gray-500 mt-1">Vehicle: {ride.car}</p>
               </div>
             </div>
@@ -319,24 +250,20 @@ export default function RideDetail() {
                 <p className="text-xs text-center text-gray-500">
                   Clicking SOS will call 112 and share your live location with your emergency contacts.
                 </p>
-                <Button onClick={() => handleEndJourney()} variant="outline" className="w-full mt-4">
+                <Button onClick={() => setIsRideActive(false)} variant="outline" className="w-full mt-4">
                   End Journey
                 </Button>
               </div>
             ) : isDriver ? (
               <div className="space-y-4">
                 <h3 className="text-xl font-bold">Manage Your Ride</h3>
-                <p className="text-gray-500 text-sm">You can manage requests from your profile dashboard.</p>
+                <p className="text-gray-500 text-sm">You have 1 pending request and 2 approved passengers.</p>
                 
                 <Button 
                   className="w-full bg-green-600 hover:bg-green-700 h-12 text-lg"
-                  onClick={handleStartJourney}
+                  onClick={() => setIsRideActive(true)}
                 >
                   Start Journey
-                </Button>
-
-                <Button onClick={handleSOS} variant="destructive" className="w-full h-12 text-lg flex items-center justify-center gap-2">
-                  <AlertTriangle className="h-5 w-5" /> SOS EMERGENCY
                 </Button>
 
                 <Button 
@@ -362,7 +289,7 @@ export default function RideDetail() {
                   </div>
                 )}
               </div>
-            ) : !myRequest ? (
+            ) : bookingStatus === 'idle' ? (
               <div className="space-y-4">
                 <h3 className="text-xl font-bold">Join this ride</h3>
                 <p className="text-gray-500 text-sm">Send a request to the driver to join this ride.</p>
@@ -370,22 +297,13 @@ export default function RideDetail() {
                   Request to Join
                 </Button>
               </div>
-            ) : myRequest.status === 'pending' ? (
+            ) : bookingStatus === 'pending_approval' ? (
               <div className="space-y-4 text-center py-6">
                 <div className="h-16 w-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto animate-pulse">
                   <Clock className="h-8 w-8" />
                 </div>
                 <h3 className="text-xl font-bold">Request Sent!</h3>
                 <p className="text-gray-500 text-sm">Waiting for the driver to approve your request...</p>
-              </div>
-            ) : myRequest.status === 'rejected' ? (
-              <div className="space-y-4 text-center py-6">
-                <div className="h-16 w-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto">
-                  <X className="h-8 w-8" />
-                </div>
-                <h3 className="text-xl font-bold text-red-600">Request Rejected</h3>
-                <p className="text-gray-500 text-sm">The driver has declined your request for this ride.</p>
-                <Button variant="outline" className="w-full" onClick={() => navigate("/")}>Find Other Rides</Button>
               </div>
             ) : (
               <div className="space-y-4 text-center">
@@ -396,12 +314,9 @@ export default function RideDetail() {
                 <p className="text-gray-500 text-sm">You are all set for your ride to {ride.to}.</p>
                 
                 <div className="pt-4 border-t mt-4 space-y-3">
-                  <Button onClick={handleSOS} variant="destructive" className="w-full h-12 text-lg flex items-center justify-center gap-2">
-                    <AlertTriangle className="h-5 w-5" /> SOS EMERGENCY
-                  </Button>
                   <Button 
                     className="w-full bg-green-600 hover:bg-green-700 h-12 text-lg"
-                    onClick={handleStartJourney}
+                    onClick={() => setIsRideActive(true)}
                   >
                     Start Ride
                   </Button>
@@ -425,7 +340,7 @@ export default function RideDetail() {
           </CardContent>
         </Card>
 
-        {myChat && !isCancelled && (
+        {(bookingStatus !== 'idle' || isDriver) && !isCancelled && (
           <Card className="flex flex-col h-[400px]">
             <CardHeader className="pb-3 border-b">
               <CardTitle className="text-lg flex items-center gap-2">
@@ -434,16 +349,11 @@ export default function RideDetail() {
             </CardHeader>
             <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
               {messages.map((msg, i) => {
-                const isMe = msg.senderId === user?.id;
-                const isSystem = msg.senderId === 'system';
+                const isMe = msg.sender === (user?.name || "User");
                 return (
-                  <div key={msg.id || i} className={`flex ${isSystem ? "justify-center" : isMe ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[80%] rounded-2xl px-4 py-2 ${
-                      isSystem ? "bg-gray-100 text-gray-500 text-xs italic" :
-                      isMe ? "bg-blue-600 text-white rounded-br-none" : 
-                      "bg-gray-100 text-gray-900 rounded-bl-none"
-                    }`}>
-                      {!isSystem && <p className="text-xs opacity-70 mb-1">{isMe ? "You" : isDriver ? "Passenger" : "Driver"}</p>}
+                  <div key={msg.id || i} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-4 py-2 ${isMe ? "bg-blue-600 text-white rounded-br-none" : "bg-gray-100 text-gray-900 rounded-bl-none"}`}>
+                      <p className="text-xs opacity-70 mb-1">{isMe ? "You" : msg.sender}</p>
                       <p>{msg.text}</p>
                     </div>
                   </div>
