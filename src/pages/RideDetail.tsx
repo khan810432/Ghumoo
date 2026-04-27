@@ -27,19 +27,21 @@ export default function RideDetail() {
   const navigate = useNavigate();
   const { addNotification } = useNotifications();
   const { isAuthenticated, user } = useAuth();
-  const { rides } = useRides();
+  const { rides, requestRide, updateRideRequestStatus } = useRides();
   
   const ride = rides.find(r => r.id === id);
 
   const [messages, setMessages] = useState<{sender: string, text: string, id?: string}[]>([]);
   const [newMessage, setNewMessage] = useState("");
-  const [bookingStatus, setBookingStatus] = useState<'idle' | 'pending_approval' | 'confirmed'>('idle');
-  const [isDriver, setIsDriver] = useState(false); // Toggle for demo purposes
   const [isCancelled, setIsCancelled] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [isSharingLocation, setIsSharingLocation] = useState(false);
   const [isRideActive, setIsRideActive] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const isDriver = isAuthenticated && ride?.driverId === user?.id;
+  const myRequest = user ? ride?.requests?.find(r => r.passengerId === user.id) : null;
+  const showChat = isDriver || (myRequest?.status === 'accepted');
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -50,19 +52,8 @@ export default function RideDetail() {
   }, [messages]);
 
   useEffect(() => {
-    if (ride && user && ride.driver === user.name) {
-      setIsDriver(true);
-    }
-  }, [ride, user]);
-
-  useEffect(() => {
     if (!ride || !id) return;
-
-    const q = query(
-      collection(db, "rides", id, "messages"),
-      orderBy("timestamp", "asc")
-    );
-
+    const q = query(collection(db, "rides", id, "messages"), orderBy("timestamp", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedMessages = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -71,7 +62,6 @@ export default function RideDetail() {
       }));
       setMessages(fetchedMessages);
     });
-
     return () => unsubscribe();
   }, [ride, id]);
 
@@ -88,10 +78,8 @@ export default function RideDetail() {
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !user || !id) return;
-    
     const messageText = newMessage;
     setNewMessage("");
-    
     try {
       await addDoc(collection(db, "rides", id, "messages"), {
         sender: user.name || "User",
@@ -104,33 +92,32 @@ export default function RideDetail() {
     }
   };
 
-  const handleRequestJoin = () => {
-    if (!isAuthenticated) {
+  const handleRequestJoin = async () => {
+    if (!isAuthenticated || !user) {
       toast.error("Please login or sign up to request a ride.");
       navigate("/login");
       return;
     }
-    
-    if (user?.status !== 'Verified') {
+    if (user.status !== 'Verified') {
       toast.error("Please verify your profile to request a ride.");
       navigate("/onboarding");
       return;
     }
-
-    setBookingStatus('confirmed');
-    addNotification("Booking request sent! You can now chat with the driver.");
+    
+    try {
+      await requestRide(ride.id, user.id, user.name || 'User');
+      addNotification("Booking request sent! Waiting for driver approval.");
+      toast.success("Request sent successfully.");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to request ride.");
+    }
   };
 
   const handleCancel = () => {
     setIsCancelled(true);
     setShowCancelConfirm(false);
-    
-    if (isDriver) {
-      addNotification("Ride cancelled successfully. Passengers have been notified.");
-    } else {
-      addNotification(`Booking cancelled successfully.`);
-      setBookingStatus('idle');
-    }
+    if (isDriver) addNotification("Ride cancelled successfully.");
+    else addNotification(`Booking cancelled successfully.`);
   };
 
   const toggleLocationSharing = () => {
@@ -170,14 +157,16 @@ export default function RideDetail() {
       <div className="lg:col-span-2 space-y-8">
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
           <div className="h-64 w-full bg-gray-100 relative z-0">
-            <MapContainer center={[ride.coords[0], ride.coords[1]]} zoom={10} scrollWheelZoom={false} className="h-full w-full">
+            <MapContainer center={ride.coords && ride.coords.length === 2 ? [ride.coords[0], ride.coords[1]] : [28.6139, 77.2090]} zoom={10} scrollWheelZoom={false} className="h-full w-full">
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              <Marker position={[ride.coords[0], ride.coords[1]]}>
-                <Popup>Starting Point: {ride.from}</Popup>
-              </Marker>
+              {ride.coords && ride.coords.length === 2 && (
+                <Marker position={[ride.coords[0], ride.coords[1]]}>
+                  <Popup>Starting Point: {ride.from}</Popup>
+                </Marker>
+              )}
               {ride.stops?.map((stop, i) => stop.coords && (
                 <Marker key={stop.id} position={stop.coords}>
                   <Popup>Stop {i + 1}: {stop.name}</Popup>
@@ -189,12 +178,6 @@ export default function RideDetail() {
             <div className="flex justify-between items-start">
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">{ride.from} to {ride.to}</h1>
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="text-sm text-gray-500">Demo Toggle:</span>
-                  <Button variant="outline" size="sm" onClick={() => setIsDriver(!isDriver)}>
-                    View as {isDriver ? "Passenger" : "Driver"}
-                  </Button>
-                </div>
               </div>
               <div className="text-2xl font-bold text-blue-600 flex items-center">
                 <IndianRupee className="h-5 w-5 mr-1" />{ride.price}
@@ -257,7 +240,20 @@ export default function RideDetail() {
             ) : isDriver ? (
               <div className="space-y-4">
                 <h3 className="text-xl font-bold">Manage Your Ride</h3>
-                <p className="text-gray-500 text-sm">You have 1 pending request and 2 approved passengers.</p>
+                <p className="text-gray-500 text-sm">You have {(ride.requests || []).filter(r => r.status === 'pending').length} pending request(s) and {(ride.requests || []).filter(r => r.status === 'accepted').length} approved passenger(s).</p>
+                
+                {(ride.requests || []).filter(r => r.status === 'pending').map(req => (
+                  <div key={req.passengerId} className="p-3 border rounded-lg flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold">{req.passengerName}</p>
+                      <p className="text-xs text-gray-500">Wants to join</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" className="text-green-600 bg-green-50 hover:bg-green-100" onClick={() => updateRideRequestStatus(ride.id, req.passengerId, 'accepted')}>Accept</Button>
+                      <Button size="sm" variant="outline" className="text-red-600 bg-red-50 hover:bg-red-100" onClick={() => updateRideRequestStatus(ride.id, req.passengerId, 'rejected')}>Reject</Button>
+                    </div>
+                  </div>
+                ))}
                 
                 <Button 
                   className="w-full bg-green-600 hover:bg-green-700 h-12 text-lg"
@@ -289,15 +285,19 @@ export default function RideDetail() {
                   </div>
                 )}
               </div>
-            ) : bookingStatus === 'idle' ? (
+            ) : !myRequest || myRequest.status === 'rejected' ? (
               <div className="space-y-4">
-                <h3 className="text-xl font-bold">Join this ride</h3>
-                <p className="text-gray-500 text-sm">Send a request to the driver to join this ride.</p>
-                <Button className="w-full h-12 text-lg" onClick={handleRequestJoin}>
-                  Request to Join
-                </Button>
+                <h3 className="text-xl font-bold">{myRequest?.status === 'rejected' ? 'Request Rejected' : 'Join this ride'}</h3>
+                <p className="text-gray-500 text-sm">
+                  {myRequest?.status === 'rejected' ? 'The driver declined your request.' : 'Send a request to the driver to join this ride.'}
+                </p>
+                {(!myRequest || myRequest.status === 'rejected') && (
+                  <Button className="w-full h-12 text-lg" onClick={handleRequestJoin}>
+                    Request to Join
+                  </Button>
+                )}
               </div>
-            ) : bookingStatus === 'pending_approval' ? (
+            ) : myRequest.status === 'pending' ? (
               <div className="space-y-4 text-center py-6">
                 <div className="h-16 w-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto animate-pulse">
                   <Clock className="h-8 w-8" />
@@ -340,7 +340,7 @@ export default function RideDetail() {
           </CardContent>
         </Card>
 
-        {(bookingStatus !== 'idle' || isDriver) && !isCancelled && (
+        {showChat && !isCancelled && (
           <Card className="flex flex-col h-[400px]">
             <CardHeader className="pb-3 border-b">
               <CardTitle className="text-lg flex items-center gap-2">

@@ -49,36 +49,34 @@ export function LocationAutocomplete({
 
       setLoading(true);
       try {
-        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(value)}&limit=5`);
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(value)}&limit=5&addressdetails=1`);
+        if (!res.ok) {
+          throw new Error(`API returned ${res.status}`);
+        }
         const data = await res.json();
-        if (data.features) {
-          setSuggestions(data.features);
+        if (Array.isArray(data)) {
+          setSuggestions(data);
         }
       } catch (error) {
-        console.error("Failed to fetch suggestions", error);
+        console.warn("Failed to fetch location suggestions", error);
+        // Do not crash the UI, keep existing suggestions or clear
       } finally {
         setLoading(false);
       }
     };
 
-    const timeoutId = setTimeout(fetchSuggestions, 300);
+    const timeoutId = setTimeout(fetchSuggestions, 800);
     return () => clearTimeout(timeoutId);
   }, [value]);
 
-  const handleSelect = (feature: any) => {
-    const coords = feature.geometry.coordinates; // [lng, lat]
-    const props = feature.properties;
+  const handleSelect = (item: any) => {
+    const lat = parseFloat(item.lat);
+    const lng = parseFloat(item.lon);
     
-    // Construct a nice display name
-    const parts = [];
-    if (props.name) parts.push(props.name);
-    if (props.city && props.city !== props.name) parts.push(props.city);
-    if (props.state && props.state !== props.city) parts.push(props.state);
-    
-    const displayName = parts.join(', ') || 'Selected Location';
+    const displayName = item.display_name || item.name || 'Selected Location';
     
     onChange(displayName);
-    onSelect(coords[1], coords[0], displayName); // lat, lng
+    onSelect(lat, lng, displayName);
     setIsOpen(false);
   };
 
@@ -105,23 +103,23 @@ export function LocationAutocomplete({
 
       {isOpen && suggestions.length > 0 && (
         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
-          {suggestions.map((feature, index) => {
-            const props = feature.properties;
-            const title = props.name || props.city || props.state;
-            const subtitle = [props.city, props.state, props.country].filter(Boolean).join(', ');
+          {suggestions.map((item, index) => {
+            const address = item.address || {};
+            const title = item.name || address.city || address.town || address.village || address.suburb || address.state || item.display_name.split(',')[0];
+            const subtitle = item.display_name;
             
             return (
               <button
                 key={index}
                 type="button"
                 className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-0 flex items-start gap-3 transition-colors"
-                onClick={() => handleSelect(feature)}
+                onClick={() => handleSelect(item)}
               >
                 <MapPin className="h-5 w-5 text-gray-400 mt-0.5 flex-shrink-0" />
                 <div className="flex flex-col">
                   <span className="text-sm font-medium text-gray-900">{title}</span>
                   {subtitle && subtitle !== title && (
-                    <span className="text-xs text-gray-500">{subtitle}</span>
+                    <span className="text-xs text-gray-500 truncate w-[400px]">{subtitle}</span>
                   )}
                 </div>
               </button>

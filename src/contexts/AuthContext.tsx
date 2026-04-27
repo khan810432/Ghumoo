@@ -103,7 +103,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    // Listen to all users for admin dashboard
+    // Listen to all users for admin dashboard ONLY if user is admin
+    if (user?.role !== 'admin') {
+      setUsers([]);
+      return;
+    }
+
     const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       const usersData: User[] = [];
       snapshot.forEach((doc) => {
@@ -122,7 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     return () => unsubscribeUsers();
-  }, []);
+  }, [user?.role]);
 
   const login = async (email: string, password: string) => {
     try {

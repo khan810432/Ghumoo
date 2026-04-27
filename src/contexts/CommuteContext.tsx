@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
+import { collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc, query, orderBy, limit } from 'firebase/firestore';
 
 export interface CommuteRequest {
   id: string;
@@ -46,7 +46,7 @@ export function CommuteProvider({ children }: { children: React.ReactNode }) {
   const [activeCommutes, setActiveCommutes] = useState<CommuteRoute[]>([]);
 
   useEffect(() => {
-    const q = query(collection(db, 'commutes'), orderBy('updatedAt', 'desc'));
+    const q = query(collection(db, 'commutes'), orderBy('updatedAt', 'desc'), limit(200));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const commutesData: CommuteRoute[] = [];
       snapshot.forEach((doc) => {
