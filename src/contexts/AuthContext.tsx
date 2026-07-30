@@ -61,10 +61,11 @@ interface AuthContextType {
   completeGoogleSignup: (uid: string, name: string, email: string, phone: string) => Promise<void>;
   signup: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
-  verifyUser: () => void;
-  updateProfile: (updates: Partial<User>) => void;
-  deleteUser: (userId: string) => void;
-  updateUserPassword: (userId: string, newPassword: string) => void;
+  verifyUser: (additionalData?: Partial<User>) => Promise<void>;
+  updateUserStatus: (userId: string, newStatus: UserStatus) => Promise<void>;
+  updateProfile: (updates: Partial<User>) => Promise<void>;
+  deleteUser: (userId: string) => Promise<void>;
+  updateUserPassword: (userId: string, newPassword: string) => Promise<void>;
   isAdmin: boolean;
   isAuthenticated: boolean;
 }
@@ -77,49 +78,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsubscribeDoc: (() => void) | null = null;
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (unsubscribeDoc) {
+        unsubscribeDoc();
+        unsubscribeDoc = null;
+      }
+
       if (firebaseUser) {
-        try {
-          // Fetch user profile from Firestore
-          const docRef = doc(db, 'users', firebaseUser.uid);
-          const docSnap = await getDoc(docRef);
+        const docRef = doc(db, 'users', firebaseUser.uid);
+        unsubscribeDoc = onSnapshot(docRef, (docSnap) => {
           if (docSnap.exists()) {
-            const userData = docSnap.data() as User;
-            // Parse JSON strings back to objects
+            const userData = { ...docSnap.data(), id: firebaseUser.uid } as User;
             if (userData.vehicles && typeof userData.vehicles === 'string') {
-              userData.vehicles = JSON.parse(userData.vehicles);
+              try { userData.vehicles = JSON.parse(userData.vehicles); } catch (e) {}
             }
             if (userData.emergencyContacts && typeof userData.emergencyContacts === 'string') {
-              userData.emergencyContacts = JSON.parse(userData.emergencyContacts);
+              try { userData.emergencyContacts = JSON.parse(userData.emergencyContacts); } catch (e) {}
+            }
+            if (!userData.status) {
+              userData.status = 'Pending';
             }
             setUser(userData);
           } else {
-            // Fallback for user without Firestore record yet
-            setUser({
+            const fallbackUser: User = {
               id: firebaseUser.uid,
               name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
               email: firebaseUser.email || '',
               role: firebaseUser.email === 'admin@ghumoo.com' ? 'admin' : 'user',
-              status: 'Verified'
-            });
+              status: 'Pending'
+            };
+            setUser(fallbackUser);
           }
-        } catch (error: any) {
-          console.warn("Could not fetch user profile from Firestore:", error);
-          setUser({
-            id: firebaseUser.uid,
-            name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-            email: firebaseUser.email || '',
-            role: firebaseUser.email === 'admin@ghumoo.com' ? 'admin' : 'user',
-            status: 'Verified'
-          });
-        }
+          setLoading(false);
+        }, (error) => {
+          console.warn("User profile snapshot error:", error);
+          setLoading(false);
+        });
       } else {
         setUser(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      if (unsubscribeDoc) unsubscribeDoc();
+      unsubscribeAuth();
+    };
   }, []);
 
   useEffect(() => {
@@ -273,14 +279,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const verifyUser = async () => {
+  const verifyUser = async (additionalData?: Partial<User>) => {
     if (user) {
       try {
-        await updateDoc(doc(db, 'users', user.id), { status: 'Verified' });
-        toast.success('User verified');
+        const updates: any = { status: 'Verified', ...additionalData };
+        if (updates.vehicles && typeof updates.vehicles !== 'string') {
+          updates.vehicles = JSON.stringify(updates.vehicles);
+        }
+        if (updates.emergencyContacts && typeof updates.emergencyContacts !== 'string') {
+          updates.emergencyContacts = JSON.stringify(updates.emergencyContacts);
+        }
+        await setDoc(doc(db, 'users', user.id), updates, { merge: true });
+        setUser((prev) => (prev ? { ...prev, ...updates, status: 'Verified' } : null));
+        toast.success('Account verified successfully!');
       } catch (error) {
-        toast.error('Failed to verify user');
+        console.error('Failed to verify user:', error);
+        toast.error('Failed to verify account. Please try again.');
       }
+    }
+  };
+
+  const updateUserStatus = async (userId: string, newStatus: UserStatus) => {
+    try {
+      await setDoc(doc(db, 'users', userId), { status: newStatus }, { merge: true });
+      if (user?.id === userId) {
+        setUser((prev) => (prev ? { ...prev, status: newStatus } : null));
+      }
+      toast.success(`User status updated to ${newStatus}`);
+    } catch (error) {
+      console.error('Failed to update user status:', error);
+      toast.error('Failed to update user status');
     }
   };
 
@@ -294,7 +322,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (updates.emergencyContacts) {
           firestoreUpdates.emergencyContacts = JSON.stringify(updates.emergencyContacts);
         }
-        await updateDoc(doc(db, 'users', user.id), firestoreUpdates);
+        await setDoc(doc(db, 'users', user.id), firestoreUpdates, { merge: true });
         setUser((prev) => (prev ? { ...prev, ...updates } : null));
         toast.success('Profile updated successfully');
       } catch (error) {
@@ -333,6 +361,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signup, 
       logout,
       verifyUser,
+      updateUserStatus,
       updateProfile,
       deleteUser,
       updateUserPassword,

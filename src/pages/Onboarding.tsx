@@ -10,13 +10,15 @@ import { toast } from "sonner";
 
 export default function Onboarding() {
   const navigate = useNavigate();
-  const { verifyUser } = useAuth();
+  const { user, verifyUser } = useAuth();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [emailOtp, setEmailOtp] = useState("");
   const [phoneOtp, setPhoneOtp] = useState("");
   const [emailOtpSent, setEmailOtpSent] = useState(false);
   const [phoneOtpSent, setPhoneOtpSent] = useState(false);
+  const [aadhaarNumber, setAadhaarNumber] = useState("");
+  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
 
   const handleSendEmailOtp = () => {
     setLoading(true);
@@ -36,7 +38,7 @@ export default function Onboarding() {
     }, 1000);
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (step === 1 && emailOtpSent && emailOtp !== "123456") {
       toast.error("Invalid OTP. Please enter 123456.");
       return;
@@ -56,16 +58,24 @@ export default function Onboarding() {
     }
 
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      if (step < 4) {
-        if (step === 3) {
-          verifyUser();
-        }
-        setStep(step + 1);
+    try {
+      if (step === 3) {
+        await verifyUser({ 
+          status: 'Verified',
+          bio: user?.bio || "Verified Community Commuter"
+        });
       }
-      else navigate("/");
-    }, 1000);
+      if (step < 4) {
+        setStep(step + 1);
+      } else {
+        navigate("/");
+      }
+    } catch (e) {
+      console.error("Verification error:", e);
+      toast.error("An error occurred during verification.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -152,16 +162,38 @@ export default function Onboarding() {
           {step === 3 && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Aadhaar Number</Label>
+                <Label>Aadhaar / Gov ID Number</Label>
                 <div className="relative">
                   <FileText className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <Input placeholder="1234 5678 9012" className="pl-9" />
+                  <Input 
+                    placeholder="1234 5678 9012" 
+                    className="pl-9"
+                    value={aadhaarNumber}
+                    onChange={(e) => setAadhaarNumber(e.target.value)}
+                  />
                 </div>
               </div>
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:bg-gray-50 cursor-pointer transition-colors">
-                <ShieldCheck className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                <p className="text-sm text-gray-600 font-medium">Click to upload Aadhaar front & back</p>
-                <p className="text-xs text-gray-500 mt-1">JPG, PNG or PDF (Max 5MB)</p>
+              <div 
+                onClick={() => {
+                  setUploadedFile("aadhaar_front_back.png");
+                  toast.success("ID Document attached successfully!");
+                }}
+                className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+                  uploadedFile ? "border-green-500 bg-green-50/50" : "border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                <ShieldCheck className={`mx-auto h-10 w-10 mb-2 ${uploadedFile ? "text-green-600" : "text-gray-400"}`} />
+                {uploadedFile ? (
+                  <div>
+                    <p className="text-sm font-semibold text-green-800">Document Attached</p>
+                    <p className="text-xs text-green-600 mt-0.5">{uploadedFile}</p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-sm text-gray-600 font-medium">Click to attach ID document</p>
+                    <p className="text-xs text-gray-500 mt-1">Aadhaar, Driving License, or Passport (Max 5MB)</p>
+                  </div>
+                )}
               </div>
             </div>
           )}

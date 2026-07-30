@@ -7,11 +7,14 @@ import { Label } from "@/src/components/ui/label";
 import { User, Car, ShieldCheck, Mail, Phone, Info, Plus, Trash2, AlertTriangle } from "lucide-react";
 
 export default function Profile() {
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, verifyUser } = useAuth();
   
   const [name, setName] = useState(user?.name || "");
   const [phone, setPhone] = useState(user?.phone || "");
   const [bio, setBio] = useState(user?.bio || "");
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [aadhaarInput, setAadhaarInput] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
   
   const [vehicles, setVehicles] = useState<Vehicle[]>(user?.vehicles || []);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
@@ -45,6 +48,18 @@ export default function Profile() {
 
   const handleSaveProfile = () => {
     updateProfile({ name, phone, bio });
+  };
+
+  const handlePerformVerification = async () => {
+    setIsVerifying(true);
+    try {
+      await verifyUser({ name, phone, bio, status: 'Verified' });
+      setShowVerificationModal(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   const handleAddVehicle = () => {
@@ -146,20 +161,91 @@ export default function Profile() {
                   <Input className="pl-9" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98765 43210" />
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label>Verification Status</Label>
-                <div className="flex items-center gap-2 mt-1">
+              <div className="space-y-2 pt-2 border-t border-gray-100">
+                <Label className="text-gray-700 font-medium">Verification Status</Label>
+                <div className="mt-1">
                   {user.status === 'Verified' ? (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      <ShieldCheck className="h-3 w-3" /> Verified
-                    </span>
+                    <div className="flex items-center gap-2 bg-green-50 p-3 rounded-lg border border-green-200">
+                      <ShieldCheck className="h-5 w-5 text-green-600 shrink-0" />
+                      <div>
+                        <p className="text-xs font-bold text-green-800 uppercase tracking-wide">Account Verified</p>
+                        <p className="text-xs text-green-700 mt-0.5">Your identity is verified with government ID & phone.</p>
+                      </div>
+                    </div>
                   ) : (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                      Pending Verification
-                    </span>
+                    <div className="bg-amber-50/80 p-3.5 rounded-lg border border-amber-200 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                          Pending Verification
+                        </span>
+                        <Button 
+                          size="sm" 
+                          onClick={() => setShowVerificationModal(true)}
+                          className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-8 px-3"
+                        >
+                          <ShieldCheck className="h-3.5 w-3.5 mr-1" /> Verify Now
+                        </Button>
+                      </div>
+                      <p className="text-xs text-amber-800">
+                        Complete identity verification to get the verified badge and build trust with co-riders.
+                      </p>
+                    </div>
                   )}
                 </div>
               </div>
+
+              {showVerificationModal && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                  <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 space-y-5 relative">
+                    <div className="flex items-center justify-between border-b pb-3">
+                      <h3 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                        <ShieldCheck className="h-5 w-5 text-blue-600" /> Complete Profile Verification
+                      </h3>
+                      <button onClick={() => setShowVerificationModal(false)} className="text-gray-400 hover:text-gray-600 text-lg font-bold">×</button>
+                    </div>
+
+                    <p className="text-xs text-gray-600">
+                      Provide your verification details to verify your account and save your verified status to your profile.
+                    </p>
+
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Aadhaar / Govt ID Number</Label>
+                        <Input 
+                          placeholder="e.g. 1234 5678 9012" 
+                          value={aadhaarInput} 
+                          onChange={(e) => setAadhaarInput(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Confirm Phone Number</Label>
+                        <Input 
+                          placeholder="+91 98765 43210" 
+                          value={phone} 
+                          onChange={(e) => setPhone(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 pt-2">
+                      <Button 
+                        onClick={handlePerformVerification} 
+                        disabled={isVerifying}
+                        className="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium"
+                      >
+                        {isVerifying ? "Verifying..." : "Verify & Save Status"}
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        onClick={() => setShowVerificationModal(false)}
+                        className="flex-1"
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 

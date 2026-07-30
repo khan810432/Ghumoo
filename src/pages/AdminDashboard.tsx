@@ -7,7 +7,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useRides } from "../contexts/RideContext";
 
 export default function AdminDashboard() {
-  const { users, deleteUser, updateUserPassword } = useAuth();
+  const { users, deleteUser, updateUserPassword, updateUserStatus } = useAuth();
   const { rides } = useRides();
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [isEditingPassword, setIsEditingPassword] = useState(false);
@@ -131,23 +131,57 @@ export default function AdminDashboard() {
                 </div>
               )}
               
-              <div className="pt-4 border-t flex justify-between items-center">
-                <p className="text-sm text-gray-500">
-                  <span className="font-medium text-gray-700">Total Rides Offered:</span> {getUserRidesCount(selectedUser.name)}
-                </p>
-                <Button 
-                  variant="destructive" 
-                  size="sm" 
-                  className="flex items-center gap-2"
-                  onClick={() => {
-                    if (window.confirm("Are you sure you want to delete this user?")) {
-                      deleteUser(selectedUser.id);
-                      setSelectedUser(null);
-                    }
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" /> Delete User
-                </Button>
+              <div className="pt-4 border-t space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-gray-500">
+                    <span className="font-medium text-gray-700">Verification Action:</span>
+                  </p>
+                  <div className="flex gap-2">
+                    {selectedUser.status !== 'Verified' ? (
+                      <Button 
+                        size="sm" 
+                        className="bg-green-600 hover:bg-green-700 text-white text-xs h-8"
+                        onClick={() => {
+                          updateUserStatus(selectedUser.id, 'Verified');
+                          setSelectedUser({ ...selectedUser, status: 'Verified' });
+                        }}
+                      >
+                        Approve & Verify
+                      </Button>
+                    ) : (
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        className="text-amber-700 border-amber-300 hover:bg-amber-50 text-xs h-8"
+                        onClick={() => {
+                          updateUserStatus(selectedUser.id, 'Pending');
+                          setSelectedUser({ ...selectedUser, status: 'Pending' });
+                        }}
+                      >
+                        Mark as Pending
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center pt-2">
+                  <p className="text-sm text-gray-500">
+                    <span className="font-medium text-gray-700">Total Rides Offered:</span> {getUserRidesCount(selectedUser.name)}
+                  </p>
+                  <Button 
+                    variant="destructive" 
+                    size="sm" 
+                    className="flex items-center gap-2"
+                    onClick={() => {
+                      if (window.confirm("Are you sure you want to delete this user?")) {
+                        deleteUser(selectedUser.id);
+                        setSelectedUser(null);
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" /> Delete User
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
