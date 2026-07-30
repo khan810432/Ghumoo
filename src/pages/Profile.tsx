@@ -15,6 +15,21 @@ export default function Profile() {
   
   const [vehicles, setVehicles] = useState<Vehicle[]>(user?.vehicles || []);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
+
+  React.useEffect(() => {
+    if (user?.vehicles) {
+      setVehicles(user.vehicles);
+    }
+  }, [user?.vehicles]);
+
+  React.useEffect(() => {
+    if (user) {
+      setName(user.name || "");
+      setPhone(user.phone || "");
+      setBio(user.bio || "");
+      if (user.emergencyContacts) setEmergencyContacts(user.emergencyContacts);
+    }
+  }, [user]);
   
   const [make, setMake] = useState("");
   const [model, setModel] = useState("");

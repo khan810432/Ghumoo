@@ -117,7 +117,7 @@ const RejectedTimerButton = ({ updatedAt }: { updatedAt: number }) => {
 
 export default function DailyCommute() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, updateProfile } = useAuth();
   const {
     activeCommutes,
     startCommute,
@@ -143,6 +143,55 @@ export default function DailyCommute() {
   const [seats, setSeats] = useState(2);
   const [fare, setFare] = useState<number | "">("");
   const [selectedVehicle, setSelectedVehicle] = useState<string>("");
+  
+  // Inline Vehicle Addition State
+  const [showAddVehicleForm, setShowAddVehicleForm] = useState(false);
+  const [vMake, setVMake] = useState("");
+  const [vModel, setVModel] = useState("");
+  const [vYear, setVYear] = useState("");
+  const [vLicensePlate, setVLicensePlate] = useState("");
+  const [vColor, setVColor] = useState("");
+
+  useEffect(() => {
+    if (user?.vehicles && user.vehicles.length > 0) {
+      if (!selectedVehicle || !user.vehicles.some((v: any, i: number) => (v.id || i.toString()) === selectedVehicle)) {
+        setSelectedVehicle(user.vehicles[0].id || "0");
+      }
+    }
+  }, [user?.vehicles]);
+
+  const handleInlineAddVehicle = async () => {
+    if (!vMake || !vModel || !vLicensePlate) {
+      toast.error("Please enter Make, Model, and License Plate");
+      return;
+    }
+
+    const newVehicle = {
+      id: Math.random().toString(36).substring(2, 9),
+      make: vMake,
+      model: vModel,
+      year: vYear || "2022",
+      licensePlate: vLicensePlate.toUpperCase(),
+      color: vColor || "Silver"
+    };
+
+    const currentVehicles = user?.vehicles || [];
+    const updatedVehicles = [...currentVehicles, newVehicle];
+
+    try {
+      await updateProfile({ vehicles: updatedVehicles });
+      setSelectedVehicle(newVehicle.id);
+      setVMake("");
+      setVModel("");
+      setVYear("");
+      setVLicensePlate("");
+      setVColor("");
+      setShowAddVehicleForm(false);
+      toast.success("Vehicle saved and selected!");
+    } catch (e) {
+      toast.error("Failed to save vehicle details.");
+    }
+  };
   const [userLocation, setUserLocation] = useState<[number, number] | null>(
     null,
   );
@@ -370,7 +419,7 @@ export default function DailyCommute() {
 
     const vehicleObj = user?.vehicles?.find(
       (v: any, i: number) => (v.id || i.toString()) === selectedVehicle,
-    );
+    ) || user?.vehicles?.[0];
 
     try {
       await startCommute({
@@ -806,24 +855,56 @@ export default function DailyCommute() {
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label>Select Vehicle</Label>
-                      <select
-                        className="w-full h-10 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer hover:border-gray-400"
-                        value={selectedVehicle}
-                        onChange={(e) => setSelectedVehicle(e.target.value)}
-                      >
-                        <option value="">-- No vehicle selected --</option>
-                        {user?.vehicles?.map((v: any, i: number) => (
-                          <option key={i} value={v.id || i.toString()}>
-                            {v.make} {v.model} ({v.licensePlate})
-                          </option>
-                        ))}
-                      </select>
-                      {(!user?.vehicles || user.vehicles.length === 0) && (
-                        <p className="text-xs text-amber-600 mt-1">
-                          You have not added any vehicles to your profile.
-                        </p>
+                    <div className="space-y-3 bg-gray-50/50 p-4 rounded-xl border border-gray-100">
+                      <div className="flex items-center justify-between">
+                        <Label className="font-semibold text-gray-900">Select Vehicle</Label>
+                        <Button 
+                          type="button" 
+                          variant="ghost" 
+                          size="sm" 
+                          className="text-xs text-blue-600 hover:bg-blue-50 h-7 px-2"
+                          onClick={() => setShowAddVehicleForm(!showAddVehicleForm)}
+                        >
+                          {showAddVehicleForm ? "Cancel" : "+ Add New Vehicle"}
+                        </Button>
+                      </div>
+
+                      {!showAddVehicleForm ? (
+                        <>
+                          <select
+                            className="w-full h-10 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer hover:border-gray-400"
+                            value={selectedVehicle}
+                            onChange={(e) => setSelectedVehicle(e.target.value)}
+                          >
+                            <option value="">-- Select a vehicle --</option>
+                            {user?.vehicles?.map((v: any, i: number) => (
+                              <option key={v.id || i} value={v.id || i.toString()}>
+                                {v.make} {v.model} ({v.licensePlate || 'No Plate'})
+                              </option>
+                            ))}
+                          </select>
+                          {(!user?.vehicles || user.vehicles.length === 0) && (
+                            <p className="text-xs text-amber-600">
+                              No vehicles saved yet. Click "+ Add New Vehicle" above.
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <div className="space-y-3 p-3 bg-white rounded-lg border border-gray-200">
+                          <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Quick Add Vehicle</h4>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input placeholder="Make (e.g. Honda)" value={vMake} onChange={(e) => setVMake(e.target.value)} className="h-9 text-xs" />
+                            <Input placeholder="Model (e.g. City)" value={vModel} onChange={(e) => setVModel(e.target.value)} className="h-9 text-xs" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input placeholder="License Plate (e.g. MH01AB1234)" value={vLicensePlate} onChange={(e) => setVLicensePlate(e.target.value)} className="h-9 text-xs uppercase" />
+                            <Input placeholder="Color (e.g. Silver)" value={vColor} onChange={(e) => setVColor(e.target.value)} className="h-9 text-xs" />
+                          </div>
+                          <div className="flex gap-2 pt-1">
+                            <Button type="button" size="sm" className="w-full h-8 text-xs bg-blue-600" onClick={handleInlineAddVehicle}>Save & Select</Button>
+                            <Button type="button" size="sm" variant="outline" className="w-full h-8 text-xs" onClick={() => setShowAddVehicleForm(false)}>Cancel</Button>
+                          </div>
+                        </div>
                       )}
                     </div>
 

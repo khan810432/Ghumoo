@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { User, MapPin, Calendar, Clock, IndianRupee, Send, ShieldCheck, AlertCircle, Navigation, AlertTriangle } from "lucide-react";
+import { User, MapPin, Calendar, Clock, IndianRupee, Send, ShieldCheck, AlertCircle, Navigation, AlertTriangle, Car } from "lucide-react";
 import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/src/components/ui/card";
@@ -210,8 +210,13 @@ export default function RideDetail() {
                   <h3 className="text-lg font-bold">{ride.driver}</h3>
                   {ride.verified && <ShieldCheck className="h-5 w-5 text-green-500" />}
                 </div>
-                <p className="text-sm text-gray-500">★ {ride.rating} • New Driver</p>
-                <p className="text-sm text-gray-500 mt-1">Vehicle: {ride.car}</p>
+                <p className="text-sm text-gray-500">★ {ride.rating} • Verified Driver</p>
+                <div className="mt-1 flex items-center gap-1.5 text-sm font-medium text-gray-700 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100 w-fit">
+                  <Car className="h-4 w-4 text-blue-600" />
+                  <span>
+                    Vehicle: {ride.vehicle ? `${ride.vehicle.make} ${ride.vehicle.model} (${ride.vehicle.licensePlate})${ride.vehicle.color ? ` • ${ride.vehicle.color}` : ''}` : (ride.car || "Standard Car")}
+                  </span>
+                </div>
               </div>
             </div>
           </div>

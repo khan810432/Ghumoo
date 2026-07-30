@@ -295,8 +295,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           firestoreUpdates.emergencyContacts = JSON.stringify(updates.emergencyContacts);
         }
         await updateDoc(doc(db, 'users', user.id), firestoreUpdates);
+        setUser((prev) => (prev ? { ...prev, ...updates } : null));
         toast.success('Profile updated successfully');
       } catch (error) {
+        console.error('Failed to update profile:', error);
         toast.error('Failed to update profile');
       }
     }
