@@ -257,6 +257,19 @@ export default function DailyCommute() {
   // Check if current user is already driving
   const myActiveCommute = activeCommutes.find((c) => c.driverId === user?.id);
 
+  // Check if current user is an accepted passenger in any active commute
+  const myAcceptedCommute = activeCommutes.find((c) =>
+    c.requests?.some(
+      (r) => r.passengerId === user?.id && r.status === "accepted",
+    ),
+  );
+
+  useEffect(() => {
+    if (myAcceptedCommute && !selectedDriverId) {
+      setSelectedDriverId(myAcceptedCommute.id);
+    }
+  }, [myAcceptedCommute?.id, selectedDriverId]);
+
   const fetchCurrentLocation = async () => {
     toast.loading("Getting your location...", { id: "location" });
     try {
@@ -1115,7 +1128,19 @@ export default function DailyCommute() {
               </CardContent>
             </Card>
           ) : (
-            <Card className="border-gray-200 shadow-sm">
+            <Card className="border-gray-200 shadow-sm overflow-hidden">
+              {myAcceptedCommute && (
+                <div className="p-4 bg-green-50 border-b border-green-200 flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full uppercase tracking-wider">Approved Ride Active</span>
+                    <p className="text-sm font-bold text-gray-900 mt-1">{myAcceptedCommute.driverName}'s Ride</p>
+                    <p className="text-xs text-gray-500">{myAcceptedCommute.startName} → {myAcceptedCommute.endName}</p>
+                  </div>
+                  <Button size="sm" className="bg-green-600 hover:bg-green-700 text-xs shrink-0" onClick={() => setSelectedDriverId(myAcceptedCommute.id)}>
+                    Open Chat & Route
+                  </Button>
+                </div>
+              )}
               <CardHeader>
                 <CardTitle className="text-xl">Nearby Active Drivers</CardTitle>
                 <CardDescription>

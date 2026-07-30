@@ -95,6 +95,16 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.resource.data.driverId == request.auth.uid;
       allow update: if isAuthenticated(); // Allow passengers to update requests
       allow delete: if isAuthenticated() && resource.data.driverId == request.auth.uid;
+
+      match /messages/{messageId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && 
+                      request.resource.data.senderId is string &&
+                      request.resource.data.senderName is string &&
+                      request.resource.data.text is string &&
+                      request.resource.data.text.size() > 0 &&
+                      request.resource.data.text.size() < 1000;
+      }
     }
   }
 }

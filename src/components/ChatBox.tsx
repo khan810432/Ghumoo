@@ -10,7 +10,8 @@ import {
 import { db } from "../firebase";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Send } from "lucide-react";
+import { Send, MessageSquare } from "lucide-react";
+import { toast } from "sonner";
 
 interface ChatMessage {
   id: string;
@@ -39,16 +40,22 @@ export function ChatBox({
       collection(db, "commutes", commuteId, "messages"),
       orderBy("timestamp", "asc"),
     );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as ChatMessage[];
-      setMessages(msgs);
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 100);
-    });
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const msgs = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as ChatMessage[];
+        setMessages(msgs);
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 100);
+      },
+      (error) => {
+        console.warn("Firestore Chat snapshot note:", error);
+      }
+    );
     return () => unsubscribe();
   }, [commuteId]);
 
@@ -61,25 +68,27 @@ export function ChatBox({
 
     try {
       await addDoc(collection(db, "commutes", commuteId, "messages"), {
-        senderId: currentUserId,
-        senderName: currentUserName,
+        senderId: currentUserId || "user",
+        senderName: currentUserName || "Rider",
         text: msg,
         timestamp: serverTimestamp(),
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error sending message", error);
+      toast.error("Failed to send message. Please try again.");
     }
   };
 
   return (
-    <div className="flex flex-col h-64 border rounded-xl overflow-hidden bg-gray-50 mt-4">
-      <div className="bg-blue-600 text-white p-2 text-sm font-semibold flex items-center justify-center">
+    <div className="flex flex-col h-72 border rounded-xl overflow-hidden bg-gray-50 mt-4 shadow-sm">
+      <div className="bg-blue-600 text-white p-2.5 text-sm font-semibold flex items-center justify-center gap-1.5">
+        <MessageSquare className="h-4 w-4" />
         Ride Group Chat
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2 relative">
         {messages.length === 0 && (
-          <p className="text-xs text-gray-400 text-center mt-4">
-            No messages yet. Say hello!
+          <p className="text-xs text-gray-400 text-center mt-6">
+            No messages yet in this ride chat. Say hello!
           </p>
         )}
         {messages.map((msg, idx) => {
@@ -89,16 +98,16 @@ export function ChatBox({
 
           return (
             <div
-              key={msg.id}
+              key={msg.id || idx}
               className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
             >
               {showName && (
-                <span className="text-[10px] text-gray-500 mb-0.5 ml-1">
-                  {msg.senderName}
+                <span className="text-[10px] text-gray-500 mb-0.5 ml-1 font-medium">
+                  {msg.senderName || "Rider"}
                 </span>
               )}
               <div
-                className={`px-3 py-2 rounded-2xl max-w-[85%] text-sm ${isMe ? "bg-blue-600 text-white rounded-tr-none" : "bg-white border text-gray-800 rounded-tl-none"}`}
+                className={`px-3 py-2 rounded-2xl max-w-[85%] text-sm ${isMe ? "bg-blue-600 text-white rounded-tr-none shadow-sm" : "bg-white border text-gray-800 rounded-tl-none shadow-sm"}`}
               >
                 {msg.text}
               </div>
@@ -117,7 +126,7 @@ export function ChatBox({
         <Button
           type="submit"
           size="sm"
-          className="rounded-full h-9 w-9 p-0 flex-shrink-0"
+          className="rounded-full h-9 w-9 p-0 flex-shrink-0 bg-blue-600 hover:bg-blue-700"
           disabled={!newMessage.trim()}
         >
           <Send className="h-4 w-4" />
