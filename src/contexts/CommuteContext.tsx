@@ -67,7 +67,7 @@ export function CommuteProvider({ children }: { children: React.ReactNode }) {
       });
       setActiveCommutes(commutesData);
     }, (error) => {
-      console.error("Error fetching commutes:", error);
+      console.warn("Firestore Commutes snapshot listener note:", error);
     });
 
     return () => unsubscribe();

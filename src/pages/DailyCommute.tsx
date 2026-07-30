@@ -1298,7 +1298,7 @@ export default function DailyCommute() {
                                 );
                               if (myReq?.status === "rejected") {
                                 const timeSinceUpdate =
-                                  now - (myReq.updatedAt || 0);
+                                  Date.now() - (myReq.updatedAt || 0);
                                 if (timeSinceUpdate < 30000) {
                                   const timeLeft = Math.ceil(
                                     (30000 - timeSinceUpdate) / 1000,

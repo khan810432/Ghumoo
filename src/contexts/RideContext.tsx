@@ -68,7 +68,7 @@ export function RideProvider({ children }: { children: ReactNode }) {
       });
       setRides(ridesData);
     }, (error) => {
-      console.error("Error fetching rides:", error);
+      console.warn("Firestore Rides snapshot listener note:", error);
     });
 
     return () => unsubscribe();

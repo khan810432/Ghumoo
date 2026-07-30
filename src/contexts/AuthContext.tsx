@@ -79,19 +79,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        // Fetch user profile from Firestore
-        const docRef = doc(db, 'users', firebaseUser.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const userData = docSnap.data() as User;
-          // Parse JSON strings back to objects
-          if (userData.vehicles && typeof userData.vehicles === 'string') {
-            userData.vehicles = JSON.parse(userData.vehicles);
+        try {
+          // Fetch user profile from Firestore
+          const docRef = doc(db, 'users', firebaseUser.uid);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const userData = docSnap.data() as User;
+            // Parse JSON strings back to objects
+            if (userData.vehicles && typeof userData.vehicles === 'string') {
+              userData.vehicles = JSON.parse(userData.vehicles);
+            }
+            if (userData.emergencyContacts && typeof userData.emergencyContacts === 'string') {
+              userData.emergencyContacts = JSON.parse(userData.emergencyContacts);
+            }
+            setUser(userData);
+          } else {
+            // Fallback for user without Firestore record yet
+            setUser({
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+              email: firebaseUser.email || '',
+              role: firebaseUser.email === 'admin@ghumoo.com' ? 'admin' : 'user',
+              status: 'Verified'
+            });
           }
-          if (userData.emergencyContacts && typeof userData.emergencyContacts === 'string') {
-            userData.emergencyContacts = JSON.parse(userData.emergencyContacts);
-          }
-          setUser(userData);
+        } catch (error: any) {
+          console.warn("Could not fetch user profile from Firestore:", error);
+          setUser({
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+            email: firebaseUser.email || '',
+            role: firebaseUser.email === 'admin@ghumoo.com' ? 'admin' : 'user',
+            status: 'Verified'
+          });
         }
       } else {
         setUser(null);
@@ -123,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       setUsers(usersData);
     }, (error) => {
-      console.error("Error fetching users:", error);
+      console.warn("Error fetching users (will retry when online):", error);
     });
 
     return () => unsubscribeUsers();
@@ -136,6 +156,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error: any) {
       if (error.code === 'auth/invalid-credential') {
         toast.error('Invalid email or password. If you are a new user, please Sign Up first.');
+      } else if (error.code === 'auth/firebase-app-check-token-is-invalid' || error.message?.includes('app-check')) {
+        toast.error('App Check token invalid or verification pending. Retrying request...');
+      } else if (error.code === 'auth/internal-error') {
+        toast.error('Firebase Auth internal error. Please check your credentials or try again.');
       } else {
         toast.error(error.message || 'Invalid credentials');
       }
@@ -149,21 +173,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userCredential = await signInWithPopup(auth, provider);
       const firebaseUser = userCredential.user;
 
-      const docRef = doc(db, 'users', firebaseUser.uid);
-      const docSnap = await getDoc(docRef);
-      
-      if (!docSnap.exists()) {
-        return {
-          isNewUser: true,
-          uid: firebaseUser.uid,
-          name: firebaseUser.displayName || 'Google User',
-          email: firebaseUser.email || ''
-        };
+      try {
+        const docRef = doc(db, 'users', firebaseUser.uid);
+        const docSnap = await getDoc(docRef);
+        
+        if (!docSnap.exists()) {
+          return {
+            isNewUser: true,
+            uid: firebaseUser.uid,
+            name: firebaseUser.displayName || 'Google User',
+            email: firebaseUser.email || ''
+          };
+        }
+      } catch (e) {
+        console.warn("Error fetching user document during Google login:", e);
       }
       toast.success('Logged in with Google successfully');
       return { isNewUser: false };
     } catch (error: any) {
-      toast.error(error.message || 'Failed to authenticate with Google');
+      if (error.code === 'auth/firebase-app-check-token-is-invalid' || error.message?.includes('app-check')) {
+        toast.error('App Check verification failed. Please try again.');
+      } else if (error.code === 'auth/popup-blocked') {
+        toast.error('Google Sign-In popup was blocked by the browser.');
+      } else {
+        toast.error(error.message || 'Failed to authenticate with Google');
+      }
       throw error;
     }
   };
@@ -190,6 +224,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signup = async (name: string, email: string, password: string) => {
     try {
+      if (!email || !email.includes('@')) {
+        toast.error('Please enter a valid email address.');
+        return;
+      }
+      if (!password || password.length < 6) {
+        toast.error('Password must be at least 6 characters.');
+        return;
+      }
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
 
@@ -205,7 +247,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
       toast.success('Account created successfully');
     } catch (error: any) {
-      toast.error(error.message || 'Failed to create account');
+      if (error.code === 'auth/email-already-in-use') {
+        toast.error('This email is already registered. Please sign in instead.');
+      } else if (error.code === 'auth/weak-password') {
+        toast.error('Password should be at least 6 characters long.');
+      } else if (error.code === 'auth/invalid-email') {
+        toast.error('Please enter a valid email address.');
+      } else if (error.code === 'auth/internal-error') {
+        toast.error('Authentication internal error. Please check your credentials or try again.');
+      } else if (error.code === 'auth/firebase-app-check-token-is-invalid' || error.message?.includes('app-check')) {
+        toast.error('App Check token invalid. Please retry.');
+      } else {
+        toast.error(error.message || 'Failed to create account');
+      }
       throw error;
     }
   };
